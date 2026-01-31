@@ -1,0 +1,24 @@
+{
+  "name": "demo-jonah",
+  "version": "1.0.0",
+  "description": "Exa AI Chatbot Demo",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "dev": "node server.js & cd frontend && npm run dev",
+    "server": "node server.js",
+    "frontend": "cd frontend && npm run dev",
+    "cli": "node chat.js",
+    "test": "node test-queries.js",
+    "build": "cd frontend && npm run build"
+  },
+  "dependencies": {
+    "cors": "^2.8.6",
+    "dotenv": "^17.2.3",
+    "exa-js": "^2.2.0",
+    "express": "^5.2.1",
+    "openai": "^6.16.0",
+    "react-markdown": "^10.1.0",
+    "react-syntax-highlighter": "^16.1.0"
+  }
+}

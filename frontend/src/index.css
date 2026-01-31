@@ -1,0 +1,393 @@
+@import "tailwindcss";
+
+/* Exa Design System Colors */
+@theme {
+  --color-exa-black: #000911;
+  --color-exa-dark: #272626;
+  --color-exa-gray-100: #faf9f8;
+  --color-exa-gray-200: #f9f7f7;
+  --color-exa-gray-300: #e5e5e5;
+  --color-exa-gray-400: #d4d4d4;
+  --color-exa-gray-500: #bababa;
+  --color-exa-gray-600: #6b7280;
+  --color-exa-gray-700: #636262;
+  --color-exa-gray-800: #60646c;
+  --color-exa-gray-900: #374151;
+  --color-exa-blue-light: #638dff;
+  --color-exa-blue: #0040f0;
+  --color-exa-blue-dark: #001651;
+  --color-exa-blue-border: rgba(9, 114, 213, 0.32);
+
+  --font-family-diatype: "ABC Diatype", system-ui, sans-serif;
+  --font-family-arizona: "ABC Arizona Flare", Georgia, serif;
+
+  --shadow-tag: 0px 4px 12px 0px rgba(0,0,0,0.03), 0px 2px 5px 0px rgba(0,0,0,0.03);
+  --shadow-button-sm: 0px 1px 3px 0px rgba(0,0,0,0.15), 0px 1px 2px 0px rgba(0,0,0,0.1);
+  --shadow-toggle-elevated: 0px 18px 11px 0px rgba(137,102,26,0.01), 0px 10px 10px 0px rgba(137,102,26,0.04), 0px 6px 7px 0px rgba(137,102,26,0.07), 0px 2px 4px 0px rgba(137,102,26,0.08);
+  --shadow-card: 0px 60px 17px 0px rgba(0,0,0,0), 0px 38px 15px 0px rgba(0,0,0,0), 0px 22px 13px 0px rgba(0,0,0,0.02), 0px 10px 10px 0px rgba(0,0,0,0.03), 0px 2px 5px 0px rgba(0,0,0,0.03);
+}
+
+/* Custom font-face declarations */
+@font-face {
+  font-family: "ABC Diatype";
+  src: url("/fonts/ABC Diatype/ABC Diatype Plus Variable/ABCDiatypePlusVariable-Trial.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+}
+
+@font-face {
+  font-family: "ABC Arizona Flare";
+  src: url("/fonts/ArizonaFlare/Arizona Flare/ABCArizonaFlare-Regular.woff2") format("woff2");
+  font-weight: 400;
+  font-style: normal;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: "ABC Diatype", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  line-height: 1.5;
+  margin: 0;
+  background: linear-gradient(180deg, #faf9f8 0%, #fff 100%);
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Gradient button */
+.gradient-arrow-btn {
+  background: linear-gradient(to bottom, #001651 8.654%, #0040f0);
+}
+
+/* Message animations */
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-message-in {
+  animation: message-in 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Typing indicator */
+@keyframes bounce-dot {
+  0%, 80%, 100% { transform: translateY(0); }
+  40% { transform: translateY(-4px); }
+}
+
+.animate-bounce-dot-1 { animation: bounce-dot 1.4s ease-in-out infinite; }
+.animate-bounce-dot-2 { animation: bounce-dot 1.4s ease-in-out 0.2s infinite; }
+.animate-bounce-dot-3 { animation: bounce-dot 1.4s ease-in-out 0.4s infinite; }
+
+/* Sources collapse animation */
+@keyframes sources-expand {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-sources-expand {
+  animation: sources-expand 0.3s ease-out forwards;
+}
+
+/* Flicker animation for scenic images */
+@keyframes flicker {
+  0% {
+    opacity: 0;
+  }
+  10% {
+    opacity: 1;
+  }
+  90% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+.animate-flicker {
+  animation: flicker 5s ease-in-out forwards;
+}
+
+/* Sidebar slide animation */
+@keyframes slide-in {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(0);
+  }
+}
+
+.animate-slide-in {
+  animation: slide-in 0.2s ease-out forwards;
+}
+
+/* Exa timing badge animation */
+@keyframes exa-badge-in {
+  0% {
+    opacity: 0;
+    transform: translateY(8px) scale(0.95);
+  }
+  100% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes exa-badge-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(0, 64, 240, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(0, 64, 240, 0);
+  }
+}
+
+@keyframes exa-badge-out {
+  0% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.95);
+  }
+}
+
+.exa-timing-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 14px;
+  background: white;
+  border: 1px solid #e5e5e5;
+  border-radius: 100px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.08);
+  animation: exa-badge-in 0.3s ease-out forwards, exa-badge-pulse 1.5s ease-in-out 0.3s;
+}
+
+.exa-timing-badge.fade-out {
+  animation: exa-badge-out 0.4s ease-in forwards;
+}
+
+.exa-timing-badge img {
+  height: 16px;
+  width: auto;
+}
+
+.exa-timing-badge span {
+  font-size: 13px;
+  color: #000911;
+  font-weight: 500;
+}
+
+/* Citation links */
+.citation-link {
+  background: rgba(0, 64, 240, 0.08);
+  color: #0040f0;
+  padding: 1px 4px;
+  border-radius: 4px;
+  font-size: 11px;
+  font-weight: 600;
+  text-decoration: none;
+  transition: background 0.15s ease;
+}
+
+.citation-link:hover {
+  background: rgba(0, 64, 240, 0.18);
+  text-decoration: none;
+}
+
+/* Scrollbar styling */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #d4d4d4;
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #bababa;
+}
+
+/* Prose styling for markdown */
+.prose {
+  line-height: 1.7;
+}
+
+.prose p {
+  margin-bottom: 1em;
+}
+
+.prose ul, .prose ol {
+  margin-bottom: 1em;
+  padding-left: 1.5em;
+}
+
+.prose li {
+  margin-bottom: 0.25em;
+}
+
+.prose strong {
+  font-weight: 600;
+}
+
+.prose code {
+  background: #f4f4f5;
+  padding: 0.125em 0.375em;
+  border-radius: 4px;
+  font-size: 0.875em;
+}
+
+.prose pre {
+  background: #1e1e1e;
+  color: #d4d4d4;
+  padding: 1em;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin-bottom: 1em;
+}
+
+.prose pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.prose h3 {
+  font-weight: 600;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+.prose a {
+  color: #0040f0;
+  text-decoration: underline;
+}
+
+/* Squiggle loading animation - traveling sine wave */
+@keyframes sine-travel {
+  0% {
+    stroke-dashoffset: 0;
+  }
+  100% {
+    stroke-dashoffset: -56;
+  }
+}
+
+.sine-wave {
+  stroke-dasharray: 28 28;
+  animation: sine-travel 1.5s linear infinite;
+}
+
+/* Shimmer background animation - white to blue shift */
+@keyframes shimmer-shift {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+
+.shimmer-bg {
+  background: linear-gradient(
+    90deg,
+    #ffffff 0%,
+    #f0f4ff 25%,
+    #e0eaff 50%,
+    #f0f4ff 75%,
+    #ffffff 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-shift 3s ease-in-out infinite;
+}
+
+/* Concentric rings expanding animation with horizontal ellipse undulation */
+@keyframes expand-ring {
+  0% {
+    transform: scale(1) scaleY(1);
+    opacity: 0.7;
+  }
+  25% {
+    transform: scale(1.8) scaleY(0.7);
+  }
+  50% {
+    transform: scale(2.5) scaleY(1.2);
+    opacity: 0.4;
+  }
+  75% {
+    transform: scale(3) scaleY(0.8);
+  }
+  100% {
+    transform: scale(3.5) scaleY(1);
+    opacity: 0;
+  }
+}
+
+.animate-expand-ring {
+  animation: expand-ring 2s ease-in-out infinite;
+}
+
+/* Slow text flicker animation */
+@keyframes text-flicker {
+  0%, 100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.animate-text-flicker {
+  animation: text-flicker 2s ease-in-out infinite;
+}
+
+/* Bubble wave animation */
+@keyframes bubble-wave {
+  0%, 100% {
+    transform: scale(1) rotate(0deg);
+    border-radius: 16px;
+  }
+  25% {
+    transform: scale(1.02) rotate(0.5deg);
+    border-radius: 18px 14px 16px 15px;
+  }
+  50% {
+    transform: scale(0.98) rotate(-0.5deg);
+    border-radius: 14px 17px 15px 18px;
+  }
+  75% {
+    transform: scale(1.01) rotate(0.3deg);
+    border-radius: 17px 15px 18px 14px;
+  }
+}
+
+.animate-bubble-wave {
+  animation: bubble-wave 4s ease-in-out infinite;
+}
+
