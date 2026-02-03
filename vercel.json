@@ -6,6 +6,10 @@
   "framework": null,
   "rewrites": [
     { "source": "/chatbot-demo/assets/:path*", "destination": "/assets/:path*" },
+    { "source": "/chatbot-demo/fonts/:path*", "destination": "/fonts/:path*" },
+    { "source": "/chatbot-demo/scenic/:path*", "destination": "/scenic/:path*" },
+    { "source": "/chatbot-demo/exa-logomark-blue.svg", "destination": "/exa-logomark-blue.svg" },
+    { "source": "/chatbot-demo/exa-logomark-white.svg", "destination": "/exa-logomark-white.svg" },
     { "source": "/chatbot-demo", "destination": "/index.html" },
     { "source": "/chatbot-demo/:path*", "destination": "/index.html" }
   ]
