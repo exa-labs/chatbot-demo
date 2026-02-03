@@ -5,6 +5,7 @@ import { ToggleElevated, CardGalleryItem } from "./components";
 import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
 import { ASCIIBackground } from "./components/ASCIIBackground";
 import Lottie from "lottie-react";
+import { getAssetPath, getApiPath } from "./lib/basePath";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Line, Pie, Doughnut } from 'react-chartjs-2';
 import ReactMarkdown from 'react-markdown';
@@ -103,7 +104,7 @@ function App() {
     ]);
 
     try {
-      const response = await fetch("/api/chat/stream", {
+      const response = await fetch(getApiPath("/api/chat/stream"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -237,7 +238,7 @@ function App() {
           {/* Left side - Logo and Title */}
           <div>
             <div className="flex items-center gap-2 mb-4">
-              <img src="/exa-logomark-blue.svg" alt="Exa" className="h-7 w-7" />
+              <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-7 w-7" />
               <span className="text-[18px] font-medium text-[#000911]">exa</span>
             </div>
             <h1 className="font-[family-name:var(--font-family-arizona)] text-3xl md:text-4xl tracking-tight text-[#000911] mb-2">
@@ -327,7 +328,7 @@ function App() {
 }
 
 // Scenic images for empty state (5.jpg and 9.jpg removed)
-const scenicImages = [1,2,3,4,6,7,8,10,11,12,13,14,15,16,17,18,19,20].map(n => `/scenic/${n}.jpg`);
+const scenicImages = [1,2,3,4,6,7,8,10,11,12,13,14,15,16,17,18,19,20].map(n => getAssetPath(`/scenic/${n}.jpg`));
 
 // Empty state component with centered input
 function EmptyState({ onSubmit, suggestions, disabled, model, onModelChange, exaEnabled }) {
@@ -437,7 +438,7 @@ function LoadingRings({ searching = false }) {
           <div className="absolute inset-0 -inset-x-3 -inset-y-2 rounded-full bg-white/60 backdrop-blur-sm animate-bubble-wave" />
           <span className="relative text-[13px] text-[#60646c] animate-text-flicker flex items-center gap-1.5">
             {displayText}
-            {searching && <img src="/exa-logomark-blue.svg" alt="Exa" className="h-3.5 w-auto" />}
+            {searching && <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-3.5 w-auto" />}
           </span>
         </div>
       </div>
@@ -571,7 +572,7 @@ function Message({ message }) {
               <div className="mt-3 flex items-center gap-1.5 text-[11px] text-[#60646c]">
                 <Check size={12} className="text-[#0040f0]" />
                 Powered by Exa Search
-                <img src="/exa-logomark-blue.svg" alt="Exa" className="ml-0.5 h-3 w-auto" />
+                <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="ml-0.5 h-3 w-auto" />
               </div>
             )}
           </>
@@ -825,7 +826,7 @@ function ExaTimingBadge({ sources, timeMs, fadeOut }) {
   return (
     <div className="animate-message-in">
       <div className={`exa-timing-badge ${fadeOut ? 'fade-out' : ''}`}>
-        <img src="/exa-logomark-blue.svg" alt="Exa" />
+        <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" />
         <span>found {sources} sources in {timeMs}ms</span>
       </div>
     </div>
