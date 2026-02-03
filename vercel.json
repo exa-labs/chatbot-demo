@@ -3,5 +3,10 @@
   "buildCommand": "rm -rf build public && cd frontend && npm install && npm run build",
   "outputDirectory": "frontend/dist",
   "installCommand": "npm install && cd frontend && npm install",
-  "framework": null
+  "framework": null,
+  "rewrites": [
+    { "source": "/chatbot-demo/assets/:path*", "destination": "/assets/:path*" },
+    { "source": "/chatbot-demo", "destination": "/index.html" },
+    { "source": "/chatbot-demo/:path*", "destination": "/index.html" }
+  ]
 }
