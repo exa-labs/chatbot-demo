@@ -5,6 +5,8 @@
   "installCommand": "npm install && cd frontend && npm install",
   "framework": null,
   "rewrites": [
+    { "source": "/chatbot-demo/api/chat/stream", "destination": "/api/chat/stream" },
+    { "source": "/chatbot-demo/api/chat", "destination": "/api/chat" },
     { "source": "/chatbot-demo/assets/:path*", "destination": "/assets/:path*" },
     { "source": "/chatbot-demo/fonts/:path*", "destination": "/fonts/:path*" },
     { "source": "/chatbot-demo/scenic/:path*", "destination": "/scenic/:path*" },
