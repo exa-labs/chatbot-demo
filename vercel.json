@@ -4,11 +4,6 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "npm install && cd frontend && npm install",
   "framework": null,
-  "functions": {
-    "api/**/*.js": {
-      "runtime": "@vercel/node@3"
-    }
-  },
   "rewrites": [
     { "source": "/chatbot-demo/api/chat/stream", "destination": "/api/chat/stream" },
     { "source": "/chatbot-demo/api/chat", "destination": "/api/chat" },
