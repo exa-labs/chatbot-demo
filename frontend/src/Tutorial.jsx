@@ -1,9 +1,193 @@
 import { useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, Copy, Check } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Copy, Check, FileText } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 
-// Custom minimal style - no grey highlighting
+const PAGE_CONTENT_FOR_LLM = `# Chatbot with Web Search
+
+Build an AI chatbot that intelligently calls Exa to search the web for real-time information.
+
+## Overview
+
+In this tutorial, we'll build a chatbot where the model decides when to search. No complex orchestration—just a tool definition and a system prompt. The model handles all the logic.
+
+1. Define a search tool the model can call
+2. Use exa.search with text: true to get search results with page contents
+3. Let the model decide when to search vs answer from training data
+
+GitHub repo: https://github.com/exa-labs/chatbot-demo
+
+## Why Exa in a chatbot?
+
+Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal passion project, imbuing Exa yields massive gains:
+
+1. Model agnostic: Works with OpenAI, Anthropic, or any open-source model
+2. Superior search: Faster, more relevant, and more comprehensive than model search calling
+3. Always current: Real-time information instead of stale training data
+4. Configurable: Exa's model parameters can dynamically be adjusted for any use case
+
+## Get Started
+
+### Step 1: Install dependencies
+
+\`\`\`bash
+npm install exa-js openai
+\`\`\`
+
+Get your Exa API key from the Exa Dashboard (https://dashboard.exa.ai).
+
+### Step 2: Initialize clients
+
+\`\`\`javascript
+import Exa from "exa-js";
+import OpenAI from "openai";
+
+const exa = new Exa(process.env.EXA_API_KEY);
+const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
+\`\`\`
+
+### Step 3: Define the search tool
+
+Give the model a tool it can call when it needs web information. The tool accepts 1-5 parallel searches:
+
+\`\`\`javascript
+const searchTool = {
+  type: "function",
+  function: {
+    name: "web_search",
+    description: "Search the web for current information using Exa.",
+    parameters: {
+      type: "object",
+      properties: {
+        searches: {
+          type: "array",
+          items: {
+            type: "object",
+            properties: {
+              query: { type: "string", description: "Search query" },
+              numResults: { type: "number", default: 10 },
+              category: {
+                type: "string",
+                enum: ["company", "people", "research_paper"],
+              }
+            },
+            required: ["query"]
+          },
+          description: "1-5 searches to run in parallel.",
+          maxItems: 5,
+        },
+      },
+      required: ["searches"],
+    },
+  },
+};
+\`\`\`
+
+### Step 4: Create the search function
+
+When the model calls the tool, execute an Exa search:
+
+\`\`\`javascript
+async function searchExa(query, numResults = 5) {
+  const response = await exa.search(query, {
+    numResults,
+    text: true,
+    type: "auto",
+  });
+  return response.results.map(r => ({
+    title: r.title,
+    url: r.url,
+    text: r.text?.substring(0, 2000),
+  }));
+}
+\`\`\`
+
+Note: We use text: true to get page contents along with search results—no separate scraping needed.
+
+### Step 5: Write the system prompt
+
+The system prompt tells the model when to search. This is one example—adjust for your use case.
+
+### Step 6: Implement the chat flow
+
+The core pattern: call the model with the tool available, execute parallel searches if requested, then stream the final answer:
+
+\`\`\`javascript
+async function chat(userMessage) {
+  const messages = [
+    { role: "system", content: systemPrompt },
+    { role: "user", content: userMessage },
+  ];
+
+  // First call: model decides if it needs to search
+  const response = await client.chat.completions.create({
+    model: "gpt-4o",
+    messages,
+    tools: [searchTool],
+    stream: true,
+  });
+
+  const assistantMsg = response.choices[0].message;
+
+  // No search needed—return direct answer
+  if (!assistantMsg.tool_calls) {
+    return assistantMsg.content;
+  }
+
+  // Execute parallel searches
+  const args = JSON.parse(assistantMsg.tool_calls[0].function.arguments);
+  const searchPromises = args.searches.map(s =>
+    searchExa(s.query, s.category, s.numResults)
+  );
+  const allResults = await Promise.all(searchPromises);
+
+  // Second call: answer with search context
+  messages.push(assistantMsg, {
+    role: "tool",
+    tool_call_id: assistantMsg.tool_calls[0].id,
+    content: JSON.stringify(allResults.flat()),
+  });
+
+  const final = await client.chat.completions.create({
+    model: "gpt-4o",
+    messages,
+    stream: true,
+  });
+
+  return final.choices[0].message.content;
+}
+\`\`\`
+
+Note: The model can request 1-5 parallel searches for complex queries. Streaming is supported for both the initial response and the final answer.
+
+## Conclusion
+
+That's it! The model now decides when to search, executes Exa queries for real-time information, and synthesizes answers with citations.
+
+Get started with Exa for free: https://dashboard.exa.ai/overview
+`;
+
+function CopyPageButton() {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = async () => {
+    await navigator.clipboard.writeText(PAGE_CONTENT_FOR_LLM);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  return (
+    <button
+      onClick={handleCopy}
+      className="inline-flex items-center gap-2 rounded-md border border-[#e5e5e5] bg-white px-3 py-1.5 text-sm text-[#60646c] hover:bg-[#f4f4f5] hover:text-[#000911] transition-colors"
+      title="Copy page content for LLMs"
+    >
+      {copied ? <Check size={14} className="text-green-600" /> : <FileText size={14} />}
+      <span>{copied ? "Copied!" : "Copy page"}</span>
+    </button>
+  );
+}
+
 const codeStyle = {
   'code[class*="language-"]': {
     color: '#000911',
@@ -77,7 +261,7 @@ function Accordion({ title, children }) {
         {title}
         {open ? <ChevronDown size={18} /> : <ChevronRight size={18} />}
       </button>
-      {open && <div className="border-t border-[#e5e5e5] p-4">{children}</div>}
+      {open && <div className="border-t border-[#e5e5e5] p-4 overflow-x-auto">{children}</div>}
     </div>
   );
 }
@@ -114,7 +298,10 @@ export default function Tutorial() {
       {/* Content */}
       <main className="mx-auto max-w-4xl px-6 py-12">
         {/* Title */}
-        <h1 className="text-4xl font-bold text-[#000911] mb-4">Chatbot with Web Search</h1>
+        <div className="flex items-start justify-between gap-4 mb-4">
+          <h1 className="text-4xl font-bold text-[#000911]">Chatbot with Web Search</h1>
+          <CopyPageButton />
+        </div>
         <p className="text-xl text-[#60646c] mb-8">Build an AI chatbot that intelligently calls Exa to search the web for real-time information.</p>
 
         <hr className="my-8 border-[#e5e5e5]" />
@@ -132,7 +319,7 @@ export default function Tutorial() {
 
         <p className="text-[16px] text-[#000911] mb-8">
           Check out the{" "}
-          <a href="https://github.com/exa-labs/exa-chatbot-demo" target="_blank" rel="noopener noreferrer" className="text-[#0040f0] hover:underline">
+          <a href="https://github.com/exa-labs/chatbot-demo" target="_blank" rel="noopener noreferrer" className="text-[#0040f0] hover:underline">
             GitHub repo
           </a>{" "}
           for the complete implementation.
@@ -149,7 +336,6 @@ export default function Tutorial() {
         <ol className="list-decimal list-inside mb-8 text-[#000911] space-y-2">
           <li><strong>Model agnostic</strong>: Works with OpenAI, Anthropic, or any open-source model</li>
           <li><strong>Superior search</strong>: Faster, more relevant, and more comprehensive than model search calling</li>
-          <li><strong>Cost efficient</strong>: Only pay for results you get</li>
           <li><strong>Always current</strong>: Real-time information instead of stale training data</li>
           <li><strong>Configurable</strong>: Exa's model parameters can dynamically be adjusted for any use case</li>
         </ol>
@@ -182,7 +368,7 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });`} />
           </Step>
 
           <Step number={3} title="Define the search tool">
-            <p className="mb-4">Give the model a tool it can call when it needs web information. The tool accepts 1-3 parallel searches:</p>
+            <p className="mb-4">Give the model a tool it can call when it needs web information. The tool accepts 1-5 parallel searches:</p>
             <CodeBlock language="javascript" code={`const searchTool = {
   type: "function",
   function: {
@@ -217,8 +403,8 @@ For news, sports, general facts, quotes - DO NOT use a category.\`,
             },
             required: ["query"]
           },
-          description: "1-3 searches to run in parallel.",
-          maxItems: 3,
+          description: "1-5 searches to run in parallel.",
+          maxItems: 5,
         },
       },
       required: ["searches"],
@@ -408,7 +594,7 @@ FOLLOW-UP SUGGESTIONS - Always include at the very end of your response:
   return final.choices[0].message.content;
 }`} />
 
-            <Note>The model can request 1-3 parallel searches for complex queries. Streaming is supported for both the initial response and the final answer.</Note>
+            <Note>The model can request 1-5 parallel searches for complex queries. Streaming is supported for both the initial response and the final answer.</Note>
           </Step>
         </div>
 
