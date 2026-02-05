@@ -129,12 +129,12 @@ function App() {
           if (line.startsWith("data: ")) {
             const data = JSON.parse(line.slice(6));
 
-            // Handle search_start - mark message as searching
+            // Handle search_start - mark message as searching and save queries
             if (data.queries) {
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessageId
-                    ? { ...msg, searching: true }
+                    ? { ...msg, searching: true, queries: data.queries }
                     : msg
                 )
               );
@@ -363,7 +363,7 @@ const getRandomSearchPhrase = () =>
 // Gradient loader Lottie animation URL
 const LOADER_LOTTIE = "https://assets-v2.lottiefiles.com/a/ca974640-116b-11ee-9862-ff8858832394/c8bJzzfgZt.json";
 
-function LoadingRings({ searching = false }) {
+function LoadingRings({ searching = false, queries = [] }) {
   // Pick a random phrase once when searching becomes true
   const [searchPhrase] = useState(getRandomSearchPhrase);
   const [animationData, setAnimationData] = useState(null);
@@ -376,6 +376,23 @@ function LoadingRings({ searching = false }) {
       .then(data => setAnimationData(data))
       .catch(err => console.error("Failed to load animation:", err));
   }, []);
+
+  // If we have queries, show them instead of generic loading text
+  if (searching && queries && queries.length > 0) {
+    return (
+      <div className="animate-message-in space-y-3 max-w-[85%]">
+        {queries.map((query, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2.5 animate-pulse"
+          >
+            <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+            <span className="text-[13px] text-[#000911]">{query}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="animate-message-in">
@@ -455,7 +472,7 @@ function Message({ message }) {
 
   // Show loading rings for empty streaming messages
   if (message.streaming && !message.content) {
-    return <LoadingRings searching={message.searching} />;
+    return <LoadingRings searching={message.searching} queries={message.queries} />;
   }
 
   const handleCopy = async () => {
