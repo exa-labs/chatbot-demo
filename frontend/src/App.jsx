@@ -305,36 +305,10 @@ function App() {
   );
 }
 
-// Scenic images for empty state (5.jpg and 9.jpg removed)
-const scenicImages = [1,2,3,4,6,7,8,10,11,12,13,14,15,16,17,18,19,20].map(n => getAssetPath(`/scenic/${n}.jpg`));
-
 // Empty state component with centered input
 function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
-  const [currentImage, setCurrentImage] = useState(0);
-
-  useEffect(() => {
-    if (!exaEnabled) return; // Don't run interval when Exa is off
-    const interval = setInterval(() => {
-      setCurrentImage((prev) => (prev + 1) % scenicImages.length);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [exaEnabled]);
-
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center text-center -mt-8">
-      {/* Fixed height container to keep input position consistent */}
-      <div className="h-56 flex items-end justify-center mb-8">
-        {exaEnabled ? (
-          <div className="h-48 w-80 overflow-hidden rounded-xl shadow-lg">
-            <img
-              key={currentImage}
-              src={scenicImages[currentImage]}
-              alt="Scenic destination"
-              className="h-full w-full object-cover animate-flicker"
-            />
-          </div>
-        ) : null}
-      </div>
       <div className="w-full max-w-xl">
         <ChatInputBlue
           placeholder={exaEnabled ? "Explore anywhere..." : "Model only"}
