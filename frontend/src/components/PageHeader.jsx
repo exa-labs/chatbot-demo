@@ -7,7 +7,13 @@ export function PageHeader({ title, subtitle, rightContent }) {
       <div className="mx-auto max-w-7xl px-6 lg:px-8">
         <div className="flex items-center justify-between mb-4">
           <Link to="/">
-            <img src={getAssetPath("/exa_logo.png")} alt="Exa" className="h-5 w-auto" />
+            <img
+              src={getAssetPath("/exa_logo.png")}
+              alt="Exa"
+              width={60}
+              height={20}
+              className="h-5 w-auto"
+            />
           </Link>
 
           {rightContent && (
