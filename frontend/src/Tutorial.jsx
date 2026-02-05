@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ArrowLeft, ChevronDown, ChevronRight, Copy, Check, FileText } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { getAssetPath } from "./lib/basePath";
 
 const PAGE_CONTENT_FOR_LLM = `# Chatbot with Web Search
 
@@ -283,27 +284,38 @@ export default function Tutorial() {
   return (
     <div className="min-h-screen bg-white">
       {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-[#e5e5e5] bg-white/80 backdrop-blur-sm">
-        <div className="mx-auto max-w-4xl px-6 py-4">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-2 text-[#60646c] hover:text-[#000911] transition-colors"
-          >
-            <ArrowLeft size={18} />
-            <span>Back to Chat</span>
-          </Link>
+      <header className="border-b border-[#e5e5e5] bg-white py-6 md:py-8 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+        <div className="flex items-start justify-between px-6 md:px-12 lg:px-20">
+          {/* Left side - Logo and Title */}
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-7 w-7" />
+              <span className="text-[18px] font-medium text-[#000911]">exa</span>
+            </div>
+            <h1 className="font-[family-name:var(--font-family-arizona)] text-3xl md:text-4xl tracking-tight text-[#000911] mb-2">
+              Chatbot with Web Search
+            </h1>
+            <p className="text-[#60646c] text-[16px] md:text-[17px]">
+              Build an AI chatbot that intelligently calls Exa to search the web for real-time information
+            </p>
+          </div>
+
+          {/* Right side - Back button and Copy button */}
+          <div className="flex items-center gap-4 pr-4 md:pr-8 lg:pr-12">
+            <CopyPageButton />
+            <Link
+              to="/"
+              className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-white px-5 py-2.5 text-[14px] font-medium text-[#000911] hover:border-[#0040f0] hover:text-[#0040f0] transition-colors shadow-sm"
+            >
+              <ArrowLeft size={16} />
+              <span>Back to Chat</span>
+            </Link>
+          </div>
         </div>
       </header>
 
       {/* Content */}
       <main className="mx-auto max-w-4xl px-6 py-12">
-        {/* Title */}
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <h1 className="text-4xl font-bold text-[#000911]">Chatbot with Web Search</h1>
-          <CopyPageButton />
-        </div>
-        <p className="text-xl text-[#60646c] mb-8">Build an AI chatbot that intelligently calls Exa to search the web for real-time information.</p>
-
         <hr className="my-8 border-[#e5e5e5]" />
 
         {/* Intro */}
