@@ -56,11 +56,17 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5) {
 }
 
 async function searchMultiple(searches) {
-  const searchPromises = searches.map(({ query, category, maxAgeOverride, numResults = 5 }) =>
-    searchExa(query, category, maxAgeOverride, numResults)
-      .then(results => ({ query, category, results }))
-      .catch(err => ({ query, category, results: [], error: err.message }))
-  );
+  const searchPromises = searches.map(async ({ query, category, maxAgeOverride, numResults = 5 }) => {
+    const startTime = Date.now();
+    try {
+      const results = await searchExa(query, category, maxAgeOverride, numResults);
+      const timeMs = Date.now() - startTime;
+      return { query, category, results, timeMs };
+    } catch (err) {
+      const timeMs = Date.now() - startTime;
+      return { query, category, results: [], error: err.message, timeMs };
+    }
+  });
 
   return Promise.all(searchPromises);
 }
@@ -265,9 +271,10 @@ export default async function handler(req, res) {
 
     res.json({
       content: finalResponse.choices[0].message.content,
-      searches: searchResults.map(({ query, category, results }) => ({
+      searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,
+        timeMs,
         sources: results.map((r) => ({
           title: r.title,
           url: r.url,

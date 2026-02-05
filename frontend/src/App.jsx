@@ -437,11 +437,47 @@ function SearchQueryRow({ query, category, sources = [] }) {
 
 // Message component
 function Message({ message }) {
+  const [sourcesExpanded, setSourcesExpanded] = useState(false);
+  const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
 
-  // Show loading rings for empty streaming messages (but only if no queries yet)
+  const handleCopy = async () => {
+    // Strip out chart and followup blocks for cleaner copy
+    const cleanContent = message.content
+      .replace(/```chart[\s\S]*?```/g, '')
+      .replace(/```followups[\s\S]*?```/g, '')
+      .trim();
+
+    await navigator.clipboard.writeText(cleanContent);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  // Show "Thinking..." for initial loading
   if (message.streaming && !message.content && !message.queries && !message.searches) {
-    return <LoadingRings searching={message.searching} queries={[]} />;
+    return <LoadingRings searching={false} queries={[]} />;
+  }
+
+  // Show "Searching for" with queries during search phase (before content arrives)
+  if (message.streaming && !message.content && message.queries && message.queries.length > 0) {
+    return (
+      <div className="animate-message-in">
+        <div className="inline-flex flex-col gap-2 px-1 py-2">
+          <span className="text-[13px] text-[#60646c] mb-1">Searching for</span>
+          <div className="space-y-2">
+            {message.queries.map((query, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2 animate-pulse"
+              >
+                <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+                <span className="text-[13px] text-[#000911]">{query}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
   }
 
   return (
@@ -455,40 +491,98 @@ function Message({ message }) {
               : "border border-[#e5e5e5] bg-white px-5 py-4 shadow-[var(--shadow-card)]"
         }`}
       >
+        {/* Copy button for assistant messages */}
+        {!isUser && !message.streaming && (
+          <button
+            onClick={handleCopy}
+            className="absolute right-2 top-2 rounded-md p-1.5 text-[#9ca3af] opacity-0 transition-all hover:bg-[#f4f4f5] hover:text-[#60646c] group-hover:opacity-100"
+            title="Copy to clipboard"
+          >
+            {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
+          </button>
+        )}
 
         {isUser ? (
           <p className="text-[14px]">{message.content}</p>
         ) : (
           <>
-            {/* Search queries - show at the top (from either queries or searches) */}
-            {(message.queries || message.searches) && (
-              <div className="mb-4">
-                {message.searches && message.searches.length > 0 ? (
-                  // Final state: show with sources
-                  message.searches.map((search, i) => (
-                    <SearchQueryRow
-                      key={i}
-                      query={search.query}
-                      category={search.category}
-                      sources={search.sources || []}
-                    />
-                  ))
-                ) : message.queries && message.queries.length > 0 ? (
-                  // Initial state: show queries without sources
-                  message.queries.map((query, i) => (
-                    <div
-                      key={i}
-                      className="mb-3 flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2"
-                    >
-                      <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
-                      <span className="text-[13px] text-[#000911]">{query}</span>
-                    </div>
-                  ))
-                ) : null}
+            <MessageContent content={message.content} />
+
+            {/* Search queries at bottom - only show when complete */}
+            {!message.streaming && message.searches && message.searches.length > 0 && (
+              <div className="mt-4 border-t border-[#e5e5e5] pt-4">
+                <button
+                  onClick={() => setSourcesExpanded(!sourcesExpanded)}
+                  className="flex w-full items-center justify-between text-left"
+                >
+                  <div className="flex items-center gap-2">
+                    <Search size={14} className="text-[#0040f0]" />
+                    <span className="text-[13px] font-medium text-[#000911]">
+                      {message.searches.reduce((acc, s) => acc + s.sources.length, 0)} sources from{" "}
+                      {message.searches.length} {message.searches.length === 1 ? "search" : "searches"}
+                      {message.searchTimeMs && (
+                        <span className="ml-1 font-normal text-[#60646c]">in {message.searchTimeMs}ms</span>
+                      )}
+                    </span>
+                  </div>
+                  {sourcesExpanded ? (
+                    <ChevronDown size={16} className="text-[#60646c]" />
+                  ) : (
+                    <ChevronRight size={16} className="text-[#60646c]" />
+                  )}
+                </button>
+
+                {sourcesExpanded && (
+                  <div className="mt-3 space-y-4 animate-sources-expand">
+                    {message.searches.map((search, i) => (
+                      <div key={i}>
+                        <p className="mb-2 text-[12px] text-[#60646c]">
+                          "{search.query}"
+                          {search.category && (
+                            <span className="ml-2 rounded bg-[#f4f4f5] px-1.5 py-0.5 text-[11px]">
+                              {search.category}
+                            </span>
+                          )}
+                          {search.timeMs && (
+                            <span className="ml-2 text-[#60646c]">
+                              · {search.timeMs}ms
+                            </span>
+                          )}
+                        </p>
+                        <div className="space-y-2">
+                          {search.sources.map((source, j) => (
+                            <a
+                              key={j}
+                              href={source.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="flex items-start gap-2 rounded-lg border border-[#e5e5e5] bg-[#faf9f8] p-3 transition-colors hover:border-[#d4d4d4]"
+                            >
+                              <img
+                                src={`https://www.google.com/s2/favicons?domain=${new URL(source.url).hostname}&sz=32`}
+                                alt=""
+                                className="mt-0.5 h-4 w-4 shrink-0 rounded"
+                                onError={(e) => { e.target.style.display = 'none'; }}
+                              />
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-[13px] font-medium text-[#000911]">
+                                  {source.title || "Untitled"}
+                                </p>
+                                <p className="text-[11px] text-[#60646c]">
+                                  <span className="font-medium text-[#0040f0]">{getDomain(source.url)}</span>
+                                  {source.date && ` · ${source.date.slice(0, 10)}`}
+                                  {source.author && ` · ${source.author}`}
+                                </p>
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
-
-            <MessageContent content={message.content} />
 
             {/* Exa badge */}
             {message.exaUsed && (
