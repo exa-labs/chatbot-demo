@@ -344,7 +344,7 @@ function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
         </div>
       )}
 
-      <div className="w-full max-w-xl">
+      <div className="w-full max-w-4xl px-6">
         <ChatInputBlue
           placeholder={exaEnabled ? "Explore anywhere..." : "Model only"}
           tags={suggestions}
