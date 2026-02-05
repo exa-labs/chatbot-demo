@@ -511,76 +511,22 @@ function Message({ message }) {
             {/* Search queries at bottom - only show when complete */}
             {!message.streaming && message.searches && message.searches.length > 0 && (
               <div className="mt-4 border-t border-[#e5e5e5] pt-4">
-                <button
-                  onClick={() => setSourcesExpanded(!sourcesExpanded)}
-                  className="flex w-full items-center justify-between text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <Search size={14} className="text-[#0040f0]" />
-                    <span className="text-[13px] font-medium text-[#000911]">
-                      {message.searches.reduce((acc, s) => acc + s.sources.length, 0)} sources from{" "}
-                      {message.searches.length} {message.searches.length === 1 ? "search" : "searches"}
-                      {message.searchTimeMs && (
-                        <span className="ml-1 font-normal text-[#60646c]">in {message.searchTimeMs}ms</span>
+                <div className="space-y-2">
+                  {message.searches.map((search, i) => (
+                    <div
+                      key={i}
+                      className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2"
+                    >
+                      <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+                      <span className="text-[13px] text-[#000911] flex-1">{search.query}</span>
+                      {search.timeMs && (
+                        <span className="text-[11px] text-[#60646c]">
+                          {search.timeMs}ms
+                        </span>
                       )}
-                    </span>
-                  </div>
-                  {sourcesExpanded ? (
-                    <ChevronDown size={16} className="text-[#60646c]" />
-                  ) : (
-                    <ChevronRight size={16} className="text-[#60646c]" />
-                  )}
-                </button>
-
-                {sourcesExpanded && (
-                  <div className="mt-3 space-y-4 animate-sources-expand">
-                    {message.searches.map((search, i) => (
-                      <div key={i}>
-                        <p className="mb-2 text-[12px] text-[#60646c]">
-                          "{search.query}"
-                          {search.category && (
-                            <span className="ml-2 rounded bg-[#f4f4f5] px-1.5 py-0.5 text-[11px]">
-                              {search.category}
-                            </span>
-                          )}
-                          {search.timeMs && (
-                            <span className="ml-2 text-[#60646c]">
-                              · {search.timeMs}ms
-                            </span>
-                          )}
-                        </p>
-                        <div className="space-y-2">
-                          {search.sources.map((source, j) => (
-                            <a
-                              key={j}
-                              href={source.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-start gap-2 rounded-lg border border-[#e5e5e5] bg-[#faf9f8] p-3 transition-colors hover:border-[#d4d4d4]"
-                            >
-                              <img
-                                src={`https://www.google.com/s2/favicons?domain=${new URL(source.url).hostname}&sz=32`}
-                                alt=""
-                                className="mt-0.5 h-4 w-4 shrink-0 rounded"
-                                onError={(e) => { e.target.style.display = 'none'; }}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-[13px] font-medium text-[#000911]">
-                                  {source.title || "Untitled"}
-                                </p>
-                                <p className="text-[11px] text-[#60646c]">
-                                  <span className="font-medium text-[#0040f0]">{getDomain(source.url)}</span>
-                                  {source.date && ` · ${source.date.slice(0, 10)}`}
-                                  {source.author && ` · ${source.author}`}
-                                </p>
-                              </div>
-                            </a>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
