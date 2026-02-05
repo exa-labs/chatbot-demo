@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Plus, Copy } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy } from "lucide-react";
 import { ToggleElevated, CardGalleryItem } from "./components";
 import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
 import { ASCIIBackground } from "./components/ASCIIBackground";
@@ -67,32 +67,16 @@ function App() {
     scrollToBottom();
   }, [messages, isLoading]);
 
-  const handleSubmit = async (message, attachedFile = null) => {
-    if (!message.trim() && !attachedFile) return;
+  const handleSubmit = async (message) => {
+    if (!message.trim()) return;
 
     // Update chat title if first message
     if (messages.length === 0) {
-      updateChatTitle(currentChatId, message || attachedFile?.name || "New Chat");
+      updateChatTitle(currentChatId, message || "New Chat");
     }
 
-    // Build display message (what user sees in chat)
-    let displayContent = message;
-    if (attachedFile) {
-      const fileLabel = attachedFile.type === 'code' ? 'Code' : 'File';
-      displayContent = message
-        ? `${message}\n\n📎 ${fileLabel}: ${attachedFile.name}`
-        : `📎 ${fileLabel}: ${attachedFile.name}`;
-    }
-
-    // Build full message for server (includes file content)
-    let serverMessage = message;
-    if (attachedFile) {
-      const fileLabel = attachedFile.type === 'code' ? 'Code' : 'File';
-      serverMessage = `${message}\n\n[${fileLabel}: ${attachedFile.name}]\n\`\`\`\n${attachedFile.content}\n\`\`\``;
-    }
-
-    // Add user message (display version)
-    const userMessage = { role: "user", content: displayContent };
+    // Add user message
+    const userMessage = { role: "user", content: message };
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
 
@@ -108,7 +92,7 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: serverMessage,
+          message: message,
           history: messages,
           exaEnabled,
           model,
@@ -271,24 +255,12 @@ function App() {
         </div>
       </header>
 
-      {/* Chat Header - New Chat Button */}
-      <div className="relative z-10 bg-white/80 backdrop-blur-sm">
-        <div className="flex items-center px-4 py-3">
-          <button
-            onClick={createNewChat}
-            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[#f4f4f5]"
-            title="New chat"
-          >
-            <Plus size={20} className="text-[#60646c]" />
-          </button>
-        </div>
-      </div>
 
       {/* Chat Area */}
       <main className="relative z-[1] flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl px-6 py-8">
           {messages.length === 0 ? (
-            <EmptyState onSubmit={handleSubmit} suggestions={DEFAULT_SUGGESTIONS} disabled={isLoading} model={model} onModelChange={setModel} exaEnabled={exaEnabled} />
+            <EmptyState onSubmit={handleSubmit} suggestions={DEFAULT_SUGGESTIONS} disabled={isLoading} exaEnabled={exaEnabled} />
           ) : (
             <div className="space-y-6">
               {messages.map((msg, i) => (
@@ -316,9 +288,6 @@ function App() {
               tags={followups.length > 0 ? followups : DEFAULT_SUGGESTIONS}
               onSubmit={handleSubmit}
               disabled={isLoading}
-              model={model}
-              onModelChange={setModel}
-              dropdownDirection="up"
             />
           </div>
         </footer>
@@ -331,7 +300,7 @@ function App() {
 const scenicImages = [1,2,3,4,6,7,8,10,11,12,13,14,15,16,17,18,19,20].map(n => getAssetPath(`/scenic/${n}.jpg`));
 
 // Empty state component with centered input
-function EmptyState({ onSubmit, suggestions, disabled, model, onModelChange, exaEnabled }) {
+function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
   const [currentImage, setCurrentImage] = useState(0);
 
   useEffect(() => {
@@ -363,8 +332,6 @@ function EmptyState({ onSubmit, suggestions, disabled, model, onModelChange, exa
           tags={suggestions}
           onSubmit={onSubmit}
           disabled={disabled}
-          model={model}
-          onModelChange={onModelChange}
         />
       </div>
     </div>
