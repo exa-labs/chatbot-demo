@@ -11,8 +11,11 @@
     { "source": "/chatbot-demo/fonts/:path*", "destination": "/fonts/:path*" },
     { "source": "/chatbot-demo/scenic/:path*", "destination": "/scenic/:path*" },
     { "source": "/chatbot-demo/exa-logomark-blue.svg", "destination": "/exa-logomark-blue.svg" },
-    { "source": "/chatbot-demo/exa-logomark-white.svg", "destination": "/exa-logomark-white.svg" },
-    { "source": "/chatbot-demo", "destination": "/index.html" },
+        { "source": "/chatbot-demo/exa-logomark-white.svg", "destination": "/exa-logomark-white.svg" },
+        { "source": "/chatbot-demo/exa_logo.png", "destination": "/exa_logo.png" },
+        { "source": "/chatbot-demo/favicon.svg", "destination": "/favicon.svg" },
+        { "source": "/chatbot-demo/favicon.png", "destination": "/favicon.png" },
+        { "source": "/chatbot-demo", "destination": "/index.html" },
     { "source": "/chatbot-demo/:path*", "destination": "/index.html" }
   ]
 }
