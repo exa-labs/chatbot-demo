@@ -87,7 +87,7 @@ export const ChatInputBlue = ({
   };
 
   return (
-    <div className="flex w-full max-w-[699px] flex-col items-start gap-[8px]">
+    <div className="flex w-full flex-col items-start gap-[8px]">
       {/* Input field */}
       <div className="flex w-full items-center gap-2 rounded-[8px] border border-[#e5e7eb] bg-white p-[8px] shadow-[0px_60px_17px_0px_rgba(0,0,0,0),0px_38px_15px_0px_rgba(0,0,0,0),0px_22px_13px_0px_rgba(0,0,0,0.02),0px_10px_10px_0px_rgba(0,0,0,0.03),0px_2px_5px_0px_rgba(0,0,0,0.03)]">
 
