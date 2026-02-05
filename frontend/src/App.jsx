@@ -7,7 +7,8 @@ import { PageHeader } from "./components/PageHeader";
 import { ASCIIBackground } from "./components/ASCIIBackground";
 import Button from "./components/Button";
 import Lottie from "lottie-react";
-import { getAssetPath, getApiPath } from "./lib/basePath";
+import { getApiPath } from "./lib/basePath";
+import exaLogomarkBlue from "./assets/exa-logomark-blue.svg";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Line, Pie, Doughnut } from 'react-chartjs-2';
 import ReactMarkdown from 'react-markdown';
@@ -419,7 +420,7 @@ function LoadingRings({ searching = false, queries = [] }) {
             key={i}
             className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2.5 animate-pulse"
           >
-            <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+            <img src={exaLogomarkBlue} alt="Exa" className="h-4 w-4 shrink-0" />
             <span className="text-[13px] text-[#000911]">{query}</span>
           </div>
         ))}
@@ -446,7 +447,7 @@ function LoadingRings({ searching = false, queries = [] }) {
           <div className="absolute inset-0 -inset-x-3 -inset-y-2 rounded-full bg-white/60 backdrop-blur-sm animate-bubble-wave" />
           <span className="relative text-[13px] text-[#60646c] animate-text-flicker flex items-center gap-1.5">
             {displayText}
-            {searching && <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-3.5 w-auto" />}
+            {searching && <img src={exaLogomarkBlue} alt="Exa" className="h-3.5 w-auto" />}
           </span>
         </div>
       </div>
@@ -464,7 +465,7 @@ function SearchQueryRow({ query, category, sources = [], timeMs }) {
         onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2 text-left transition-all hover:border-[#0040f0] hover:bg-white w-full"
       >
-        <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+        <img src={exaLogomarkBlue} alt="Exa" className="h-4 w-4 shrink-0" />
         <span className="text-[13px] text-[#000911] flex-1">{query}</span>
         {category && (
           <span className="rounded bg-[#f0f0f0] px-2 py-0.5 text-[11px] text-[#60646c]">
@@ -555,7 +556,7 @@ function Message({ message }) {
                 key={i}
                 className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2 animate-pulse"
               >
-                <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+                <img src={exaLogomarkBlue} alt="Exa" className="h-4 w-4 shrink-0" />
                 <span className="text-[13px] text-[#000911]">{query}</span>
               </div>
             ))}
@@ -613,7 +614,7 @@ function Message({ message }) {
               <div className="mt-3 flex items-center gap-1.5 text-[11px] text-[#60646c]">
                 <Check size={12} className="text-[#0040f0]" />
                 Powered by Exa Search
-                <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="ml-0.5 h-3 w-auto" />
+                <img src={exaLogomarkBlue} alt="Exa" className="ml-0.5 h-3 w-auto" />
               </div>
             )}
           </>
