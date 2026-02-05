@@ -316,32 +316,34 @@ const SEARCH_NUDGES = [
 function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center text-center -mt-8">
-      {/* Search Nudges */}
-      {exaEnabled && (
-        <div className="mb-12 grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-4xl px-6">
-          {SEARCH_NUDGES.map((nudge, i) => (
-            <button
-              key={i}
-              onClick={() => onSubmit(nudge.prompt)}
-              disabled={disabled}
-              className="group relative rounded-xl border border-[#e5e5e5] bg-white p-6 text-left transition-all hover:border-[#0040f0] hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              <div className="mb-2 text-sm font-medium text-[#60646c]">{nudge.title}</div>
-              <div className="text-sm text-[#000911] group-hover:text-[#0040f0] transition-colors">
-                {nudge.prompt}
-              </div>
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="w-full max-w-4xl mx-auto px-6">
+        <div className="rounded-2xl bg-[#fafafa] border border-[#f0f0f0] p-8">
+          {/* Search Nudges */}
+          {exaEnabled && (
+            <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+              {SEARCH_NUDGES.map((nudge, i) => (
+                <button
+                  key={i}
+                  onClick={() => onSubmit(nudge.prompt)}
+                  disabled={disabled}
+                  className="group relative rounded-xl border border-[#e5e5e5] bg-white p-6 text-left transition-all hover:border-[#0040f0] hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="mb-2 text-sm font-medium text-[#60646c]">{nudge.title}</div>
+                  <div className="text-sm text-[#000911] group-hover:text-[#0040f0] transition-colors">
+                    {nudge.prompt}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
 
-      <div className="w-full max-w-4xl px-6">
-        <ChatInputBlue
-          placeholder="Ask about anything on the web..."
-          tags={suggestions}
-          onSubmit={onSubmit}
-          disabled={disabled}
-        />
+          <ChatInputBlue
+            placeholder="Ask about anything on the web..."
+            tags={suggestions}
+            onSubmit={onSubmit}
+            disabled={disabled}
+          />
+        </div>
       </div>
     </div>
   );
