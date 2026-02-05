@@ -6,7 +6,6 @@ import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
 import { PageHeader } from "./components/PageHeader";
 import { ASCIIBackground } from "./components/ASCIIBackground";
 import Button from "./components/Button";
-import Lottie from "lottie-react";
 import { getAssetPath, getApiPath } from "./lib/basePath";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Line, Pie, Doughnut } from 'react-chartjs-2';
@@ -31,7 +30,6 @@ function App() {
   const [currentChatId, setCurrentChatId] = useState(chats[0].id);
   const [isLoading, setIsLoading] = useState(false);
   const [exaEnabled, setExaEnabled] = useState(true);
-  const [searchTiming, setSearchTiming] = useState(null);
   const [followups, setFollowups] = useState([]);
   const [model, setModel] = useState("google/gemini-2.5-flash");
   const messagesEndRef = useRef(null);
@@ -155,15 +153,6 @@ function App() {
               searches = data.searches;
               searchTimeMs = data.searchTimeMs;
               totalSources = data.totalSources;
-
-              // Show timing badge
-              setSearchTiming({ sources: totalSources, timeMs: searchTimeMs, fadeOut: false });
-              setTimeout(() => {
-                setSearchTiming((prev) => (prev ? { ...prev, fadeOut: true } : null));
-              }, 1500);
-              setTimeout(() => {
-                setSearchTiming(null);
-              }, 1900);
             }
 
             if (data.exaUsed !== undefined) {
@@ -246,13 +235,6 @@ function App() {
               {messages.map((msg, i) => (
                 <Message key={i} message={msg} />
               ))}
-              {searchTiming && (
-                <ExaTimingBadge
-                  sources={searchTiming.sources}
-                  timeMs={searchTiming.timeMs}
-                  fadeOut={searchTiming.fadeOut}
-                />
-              )}
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -359,24 +341,8 @@ const SEARCH_PHRASES = [
 const getRandomSearchPhrase = () =>
   SEARCH_PHRASES[Math.floor(Math.random() * SEARCH_PHRASES.length)];
 
-// Concentric rings loading indicator
-// Gradient loader Lottie animation URL
-const LOADER_LOTTIE = "https://assets-v2.lottiefiles.com/a/ca974640-116b-11ee-9862-ff8858832394/c8bJzzfgZt.json";
-
+// Simple loading indicator without orb
 function LoadingRings({ searching = false, queries = [] }) {
-  // Pick a random phrase once when searching becomes true
-  const [searchPhrase] = useState(getRandomSearchPhrase);
-  const [animationData, setAnimationData] = useState(null);
-  const displayText = searching ? searchPhrase : "Thinking...";
-
-  // Load Lottie animation
-  useEffect(() => {
-    fetch(LOADER_LOTTIE)
-      .then(res => res.json())
-      .then(data => setAnimationData(data))
-      .catch(err => console.error("Failed to load animation:", err));
-  }, []);
-
   // If we have queries, show them instead of generic loading text
   if (searching && queries && queries.length > 0) {
     return (
@@ -394,54 +360,24 @@ function LoadingRings({ searching = false, queries = [] }) {
     );
   }
 
+  // Simple text-only loading state
   return (
     <div className="animate-message-in">
       <div className="inline-flex items-center gap-2 px-1 py-2">
-        <div className="h-16 w-16">
-          {animationData ? (
-            <Lottie
-              animationData={animationData}
-              loop={true}
-              style={{ width: 64, height: 64 }}
-            />
-          ) : (
-            <div className="h-16 w-16" />
-          )}
-        </div>
-        <div className="relative">
-          {/* Animated transparent bubble background */}
-          <div className="absolute inset-0 -inset-x-3 -inset-y-2 rounded-full bg-white/60 backdrop-blur-sm animate-bubble-wave" />
-          <span className="relative text-[13px] text-[#60646c] animate-text-flicker flex items-center gap-1.5">
-            {displayText}
-            {searching && <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-3.5 w-auto" />}
-          </span>
-        </div>
+        <span className="text-[13px] text-[#60646c]">Thinking...</span>
       </div>
     </div>
   );
 }
 
-// Search Query Row component - shows Exa queries with expandable cURL
-function SearchQueryRow({ query, category }) {
-  const [showCurl, setShowCurl] = useState(false);
-
-  // Generate cURL command for this search
-  const curlCommand = `curl -X POST https://api.exa.ai/search \\
-  -H "x-api-key: YOUR_API_KEY" \\
-  -H "Content-Type: application/json" \\
-  -d '{
-    "query": "${query}",
-    ${category ? `"category": "${category}",` : ''}
-    "numResults": 10,
-    "contents": {
-      "text": true
-    }
-  }'`;
+// Search Query Row component - shows Exa queries with expandable sources
+function SearchQueryRow({ query, category, sources = [] }) {
+  const [expanded, setExpanded] = useState(false);
 
   return (
     <div className="mb-3">
       <button
-        onClick={() => setShowCurl(!showCurl)}
+        onClick={() => setExpanded(!expanded)}
         className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2 text-left transition-all hover:border-[#0040f0] hover:bg-white w-full"
       >
         <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
@@ -451,13 +387,48 @@ function SearchQueryRow({ query, category }) {
             {category}
           </span>
         )}
+        {sources.length > 0 && (
+          <span className="text-[11px] text-[#60646c]">
+            {sources.length} {sources.length === 1 ? 'source' : 'sources'}
+          </span>
+        )}
+        {sources.length > 0 && (
+          expanded ? (
+            <ChevronDown size={16} className="text-[#60646c]" />
+          ) : (
+            <ChevronRight size={16} className="text-[#60646c]" />
+          )
+        )}
       </button>
 
-      {showCurl && (
-        <div className="mt-2 rounded-lg bg-[#282c34] p-3 overflow-x-auto">
-          <pre className="text-[11px] text-[#abb2bf] font-mono whitespace-pre">
-            {curlCommand}
-          </pre>
+      {expanded && sources.length > 0 && (
+        <div className="mt-2 space-y-2 animate-sources-expand">
+          {sources.map((source, j) => (
+            <a
+              key={j}
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-start gap-2 rounded-lg border border-[#e5e5e5] bg-[#faf9f8] p-3 transition-colors hover:border-[#d4d4d4]"
+            >
+              <img
+                src={`https://www.google.com/s2/favicons?domain=${new URL(source.url).hostname}&sz=32`}
+                alt=""
+                className="mt-0.5 h-4 w-4 shrink-0 rounded"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium text-[#000911]">
+                  {source.title || "Untitled"}
+                </p>
+                <p className="text-[11px] text-[#60646c]">
+                  <span className="font-medium text-[#0040f0]">{getDomain(source.url)}</span>
+                  {source.date && ` · ${source.date.slice(0, 10)}`}
+                  {source.author && ` · ${source.author}`}
+                </p>
+              </div>
+            </a>
+          ))}
         </div>
       )}
     </div>
@@ -466,31 +437,17 @@ function SearchQueryRow({ query, category }) {
 
 // Message component
 function Message({ message }) {
-  const [sourcesExpanded, setSourcesExpanded] = useState(false);
-  const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
 
-  // Show loading rings for empty streaming messages
-  if (message.streaming && !message.content) {
-    return <LoadingRings searching={message.searching} queries={message.queries} />;
+  // Show loading rings for empty streaming messages (but only if no queries yet)
+  if (message.streaming && !message.content && !message.queries && !message.searches) {
+    return <LoadingRings searching={message.searching} queries={[]} />;
   }
-
-  const handleCopy = async () => {
-    // Strip out chart and followup blocks for cleaner copy
-    const cleanContent = message.content
-      .replace(/```chart[\s\S]*?```/g, '')
-      .replace(/```followups[\s\S]*?```/g, '')
-      .trim();
-
-    await navigator.clipboard.writeText(cleanContent);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
 
   return (
     <div className={`animate-message-in ${isUser ? "flex justify-end" : ""}`}>
       <div
-        className={`group relative max-w-[85%] rounded-[12px] ${
+        className={`relative max-w-[85%] rounded-[12px] ${
           isUser
             ? "bg-[#000911] px-4 py-3 text-white"
             : message.error
@@ -498,101 +455,40 @@ function Message({ message }) {
               : "border border-[#e5e5e5] bg-white px-5 py-4 shadow-[var(--shadow-card)]"
         }`}
       >
-        {/* Copy button for assistant messages */}
-        {!isUser && !message.streaming && (
-          <button
-            onClick={handleCopy}
-            className="absolute right-2 top-2 rounded-md p-1.5 text-[#9ca3af] opacity-0 transition-all hover:bg-[#f4f4f5] hover:text-[#60646c] group-hover:opacity-100"
-            title="Copy to clipboard"
-          >
-            {copied ? <Check size={14} className="text-green-500" /> : <Copy size={14} />}
-          </button>
-        )}
 
         {isUser ? (
           <p className="text-[14px]">{message.content}</p>
         ) : (
           <>
-            {/* Search queries - show at the top */}
-            {message.searches && message.searches.length > 0 && (
+            {/* Search queries - show at the top (from either queries or searches) */}
+            {(message.queries || message.searches) && (
               <div className="mb-4">
-                {message.searches.map((search, i) => (
-                  <SearchQueryRow key={i} query={search.query} category={search.category} />
-                ))}
+                {message.searches && message.searches.length > 0 ? (
+                  // Final state: show with sources
+                  message.searches.map((search, i) => (
+                    <SearchQueryRow
+                      key={i}
+                      query={search.query}
+                      category={search.category}
+                      sources={search.sources || []}
+                    />
+                  ))
+                ) : message.queries && message.queries.length > 0 ? (
+                  // Initial state: show queries without sources
+                  message.queries.map((query, i) => (
+                    <div
+                      key={i}
+                      className="mb-3 flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2"
+                    >
+                      <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+                      <span className="text-[13px] text-[#000911]">{query}</span>
+                    </div>
+                  ))
+                ) : null}
               </div>
             )}
 
             <MessageContent content={message.content} />
-
-            {/* Sources section */}
-            {message.searches && message.searches.length > 0 && (
-              <div className="mt-4 border-t border-[#e5e5e5] pt-4">
-                <button
-                  onClick={() => setSourcesExpanded(!sourcesExpanded)}
-                  className="flex w-full items-center justify-between text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <Search size={14} className="text-[#0040f0]" />
-                    <span className="text-[13px] font-medium text-[#000911]">
-                      {message.searches.reduce((acc, s) => acc + s.sources.length, 0)} sources from{" "}
-                      {message.searches.length} {message.searches.length === 1 ? "search" : "searches"}
-                      {message.searchTimeMs && (
-                        <span className="ml-1 font-normal text-[#60646c]">in {message.searchTimeMs}ms</span>
-                      )}
-                    </span>
-                  </div>
-                  {sourcesExpanded ? (
-                    <ChevronDown size={16} className="text-[#60646c]" />
-                  ) : (
-                    <ChevronRight size={16} className="text-[#60646c]" />
-                  )}
-                </button>
-
-                {sourcesExpanded && (
-                  <div className="mt-3 space-y-4 animate-sources-expand">
-                    {message.searches.map((search, i) => (
-                      <div key={i}>
-                        <p className="mb-2 text-[12px] text-[#60646c]">
-                          "{search.query}"{search.category && (
-                            <span className="ml-2 rounded bg-[#f4f4f5] px-1.5 py-0.5 text-[11px]">
-                              {search.category}
-                            </span>
-                          )}
-                        </p>
-                        <div className="space-y-2">
-                          {search.sources.map((source, j) => (
-                            <a
-                              key={j}
-                              href={source.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-start gap-2 rounded-lg border border-[#e5e5e5] bg-[#faf9f8] p-3 transition-colors hover:border-[#d4d4d4]"
-                            >
-                              <img
-                                src={`https://www.google.com/s2/favicons?domain=${new URL(source.url).hostname}&sz=32`}
-                                alt=""
-                                className="mt-0.5 h-4 w-4 shrink-0 rounded"
-                                onError={(e) => { e.target.style.display = 'none'; }}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-[13px] font-medium text-[#000911]">
-                                  {source.title || "Untitled"}
-                                </p>
-                                <p className="text-[11px] text-[#60646c]">
-                                  <span className="font-medium text-[#0040f0]">{getDomain(source.url)}</span>
-                                  {source.date && ` · ${source.date.slice(0, 10)}`}
-                                  {source.author && ` · ${source.author}`}
-                                </p>
-                              </div>
-                            </a>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            )}
 
             {/* Exa badge */}
             {message.exaUsed && (
@@ -843,31 +739,6 @@ function ChartRenderer({ data }) {
     <div className="mt-4 rounded-lg border border-[#e5e5e5] bg-white p-5">
       <div className="max-w-lg mx-auto">
         <ChartComponent data={chartData} options={options} />
-      </div>
-    </div>
-  );
-}
-
-// Exa timing badge
-function ExaTimingBadge({ sources, timeMs, fadeOut }) {
-  return (
-    <div className="animate-message-in">
-      <div className={`exa-timing-badge ${fadeOut ? 'fade-out' : ''}`}>
-        <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" />
-        <span>found {sources} sources in {timeMs}ms</span>
-      </div>
-    </div>
-  );
-}
-
-// Loading indicator
-function LoadingIndicator() {
-  return (
-    <div className="animate-message-in">
-      <div className="inline-flex items-center gap-1 rounded-[12px] border border-[#e5e5e5] bg-white px-4 py-3 shadow-[var(--shadow-card)]">
-        <div className="h-2 w-2 rounded-full bg-[#0040f0] animate-bounce-dot-1" />
-        <div className="h-2 w-2 rounded-full bg-[#0040f0] animate-bounce-dot-2" />
-        <div className="h-2 w-2 rounded-full bg-[#0040f0] animate-bounce-dot-3" />
       </div>
     </div>
   );
