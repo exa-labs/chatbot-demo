@@ -6,6 +6,7 @@ import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
 import { PageHeader } from "./components/PageHeader";
 import { ASCIIBackground } from "./components/ASCIIBackground";
 import Button from "./components/Button";
+import Lottie from "lottie-react";
 import { getAssetPath, getApiPath } from "./lib/basePath";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Line, Pie, Doughnut } from 'react-chartjs-2';
@@ -59,12 +60,38 @@ function App() {
     ));
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  // Debounced scroll for smoother experience
+  const scrollTimeoutRef = useRef(null);
+  const isUserAtBottomRef = useRef(true);
+
+  const scrollToBottom = (behavior = "instant") => {
+    // Check if user is near bottom (within 100px)
+    const element = messagesEndRef.current?.parentElement;
+    if (element) {
+      const isNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 100;
+      isUserAtBottomRef.current = isNearBottom;
+    }
+
+    // Only auto-scroll if user is at bottom
+    if (isUserAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior });
+    }
+  };
+
+  const debouncedScroll = () => {
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = setTimeout(() => {
+      // Use instant scroll during streaming for smoothness
+      const behavior = isLoading ? "instant" : "smooth";
+      scrollToBottom(behavior);
+    }, 150);
   };
 
   useEffect(() => {
-    scrollToBottom();
+    debouncedScroll();
+    return () => {
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
   }, [messages, isLoading]);
 
   const handleSubmit = async (message) => {
@@ -111,9 +138,33 @@ function App() {
       let searchTimeMs = null;
       let totalSources = null;
 
+      // Batching for smoother streaming
+      let contentBuffer = "";
+      let batchTimeout = null;
+      const BATCH_DELAY = 16; // 16ms batching window (~60fps)
+
+      const flushContentBuffer = () => {
+        if (contentBuffer) {
+          const bufferedContent = contentBuffer;
+          contentBuffer = "";
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? { ...msg, content: msg.content + bufferedContent }
+                : msg
+            )
+          );
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          // Flush any remaining buffered content
+          if (batchTimeout) clearTimeout(batchTimeout);
+          flushContentBuffer();
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
@@ -129,6 +180,10 @@ function App() {
 
             // Handle search_start - mark message as searching and save queries
             if (data.queries) {
+              // Flush content buffer before state change
+              if (batchTimeout) clearTimeout(batchTimeout);
+              flushContentBuffer();
+
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessageId
@@ -139,14 +194,11 @@ function App() {
             }
 
             if (data.content) {
-              // Append content to streaming message
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, content: msg.content + data.content }
-                    : msg
-                )
-              );
+              // Batch content updates for smoother streaming
+              contentBuffer += data.content;
+
+              if (batchTimeout) clearTimeout(batchTimeout);
+              batchTimeout = setTimeout(flushContentBuffer, BATCH_DELAY);
             }
 
             if (data.searches) {
@@ -341,8 +393,23 @@ const SEARCH_PHRASES = [
 const getRandomSearchPhrase = () =>
   SEARCH_PHRASES[Math.floor(Math.random() * SEARCH_PHRASES.length)];
 
-// Simple loading indicator without orb
+// Gradient loader Lottie animation URL
+const LOADER_LOTTIE = "https://assets-v2.lottiefiles.com/a/ca974640-116b-11ee-9862-ff8858832394/c8bJzzfgZt.json";
+
 function LoadingRings({ searching = false, queries = [] }) {
+  // Pick a random phrase once when searching becomes true
+  const [searchPhrase] = useState(getRandomSearchPhrase);
+  const [animationData, setAnimationData] = useState(null);
+  const displayText = searching ? searchPhrase : "Thinking...";
+
+  // Load Lottie animation
+  useEffect(() => {
+    fetch(LOADER_LOTTIE)
+      .then(res => res.json())
+      .then(data => setAnimationData(data))
+      .catch(err => console.error("Failed to load animation:", err));
+  }, []);
+
   // If we have queries, show them instead of generic loading text
   if (searching && queries && queries.length > 0) {
     return (
@@ -360,18 +427,35 @@ function LoadingRings({ searching = false, queries = [] }) {
     );
   }
 
-  // Simple text-only loading state
   return (
     <div className="animate-message-in">
       <div className="inline-flex items-center gap-2 px-1 py-2">
-        <span className="text-[13px] text-[#60646c]">Thinking...</span>
+        <div className="h-16 w-16">
+          {animationData ? (
+            <Lottie
+              animationData={animationData}
+              loop={true}
+              style={{ width: 64, height: 64 }}
+            />
+          ) : (
+            <div className="h-16 w-16" />
+          )}
+        </div>
+        <div className="relative">
+          {/* Animated transparent bubble background */}
+          <div className="absolute inset-0 -inset-x-3 -inset-y-2 rounded-full bg-white/60 backdrop-blur-sm animate-bubble-wave" />
+          <span className="relative text-[13px] text-[#60646c] animate-text-flicker flex items-center gap-1.5">
+            {displayText}
+            {searching && <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-3.5 w-auto" />}
+          </span>
+        </div>
       </div>
     </div>
   );
 }
 
 // Search Query Row component - shows Exa queries with expandable sources
-function SearchQueryRow({ query, category, sources = [] }) {
+function SearchQueryRow({ query, category, sources = [], timeMs }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -390,6 +474,7 @@ function SearchQueryRow({ query, category, sources = [] }) {
         {sources.length > 0 && (
           <span className="text-[11px] text-[#60646c]">
             {sources.length} {sources.length === 1 ? 'source' : 'sources'}
+            {timeMs && ` · ${timeMs}ms`}
           </span>
         )}
         {sources.length > 0 && (
@@ -511,22 +596,15 @@ function Message({ message }) {
             {/* Search queries at bottom - only show when complete */}
             {!message.streaming && message.searches && message.searches.length > 0 && (
               <div className="mt-4 border-t border-[#e5e5e5] pt-4">
-                <div className="space-y-2">
-                  {message.searches.map((search, i) => (
-                    <div
-                      key={i}
-                      className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2"
-                    >
-                      <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
-                      <span className="text-[13px] text-[#000911] flex-1">{search.query}</span>
-                      {search.timeMs && (
-                        <span className="text-[11px] text-[#60646c]">
-                          {search.timeMs}ms
-                        </span>
-                      )}
-                    </div>
-                  ))}
-                </div>
+                {message.searches.map((search, i) => (
+                  <SearchQueryRow
+                    key={i}
+                    query={search.query}
+                    category={search.category}
+                    sources={search.sources || []}
+                    timeMs={search.timeMs}
+                  />
+                ))}
               </div>
             )}
 

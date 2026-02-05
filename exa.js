@@ -74,11 +74,17 @@ async function rateLimitedSearch(query, category, maxAgeOverride, numResults) {
  * Run multiple searches in parallel for faster results
  */
 export async function searchMultiple(searches) {
-  const searchPromises = searches.map(({ query, category, maxAgeOverride, numResults = 10 }) =>
-    searchExa(query, category, maxAgeOverride, numResults)
-      .then(results => ({ query, category, results }))
-      .catch(err => ({ query, category, results: [], error: err.message }))
-  );
+  const searchPromises = searches.map(async ({ query, category, maxAgeOverride, numResults = 5 }) => {
+    const startTime = Date.now();
+    try {
+      const results = await searchExa(query, category, maxAgeOverride, numResults);
+      const timeMs = Date.now() - startTime;
+      return { query, category, results, timeMs };
+    } catch (err) {
+      const timeMs = Date.now() - startTime;
+      return { query, category, results: [], timeMs, error: err.message };
+    }
+  });
 
   return Promise.all(searchPromises);
 }

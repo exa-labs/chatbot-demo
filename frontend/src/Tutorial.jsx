@@ -21,7 +21,7 @@ GitHub repo: https://github.com/exa-labs/chatbot-demo
 
 ## Why Exa in a chatbot?
 
-Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal passion project, imbuing Exa yields massive gains:
+Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal project, imbuing Exa yields massive gains:
 
 1. Model agnostic: Works with OpenAI, Anthropic, or any open-source model
 2. Superior search: Faster, more relevant, and more comprehensive than model search calling
@@ -286,7 +286,7 @@ export default function Tutorial() {
         {/* Why Exa */}
         <h2 className="text-2xl font-bold text-[#000911] mb-4">Why Exa in a chatbot?</h2>
         <p className="text-[16px] text-[#000911] mb-4">
-          Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal passion project, <em>imbuing Exa yields massive gains:</em>
+          Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal project, <em>imbuing Exa yields massive gains:</em>
         </p>
 
         <ol className="list-decimal list-inside mb-8 text-[#000911] space-y-2">

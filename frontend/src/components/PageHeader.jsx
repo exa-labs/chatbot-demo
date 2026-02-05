@@ -3,28 +3,27 @@ import { getAssetPath } from "../lib/basePath";
 
 export function PageHeader({ title, subtitle, rightContent }) {
   return (
-    <header className="relative z-[1] bg-white py-6 md:py-8">
-      <div className="mx-auto max-w-7xl px-6 md:px-12 lg:px-20">
-        <div className="flex items-start justify-between">
-          {/* Left side - Logo and Title */}
-          <div>
-            <Link to="/" className="mb-4">
-              <img src={getAssetPath("/exa_logo.png")} alt="Exa" className="h-5 w-auto" />
-            </Link>
-            <h1 className="font-[family-name:var(--font-family-arizona)] text-3xl md:text-4xl tracking-tight text-[#000911] mb-2">
-              {title}
-            </h1>
-            <p className="text-[#60646c] text-[16px] md:text-[17px]">
-              {subtitle}
-            </p>
-          </div>
+    <header className="relative z-[1] bg-white pt-8 pb-12">
+      <div className="mx-auto max-w-7xl px-6 lg:px-8">
+        <div className="flex items-center justify-between mb-4">
+          <Link to="/">
+            <img src={getAssetPath("/exa_logo.png")} alt="Exa" className="h-5 w-auto" />
+          </Link>
 
-          {/* Right side - Custom content */}
           {rightContent && (
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
               {rightContent}
             </div>
           )}
+        </div>
+
+        <div>
+          <h1 className="font-arizona text-4xl tracking-tight text-black sm:text-5xl">
+            {title}
+          </h1>
+          <p className="mt-4 text-lg text-black/60">
+            {subtitle}
+          </p>
         </div>
       </div>
     </header>

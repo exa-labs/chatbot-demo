@@ -183,9 +183,10 @@ app.post("/api/chat/stream", async (req, res) => {
     sendEvent("search_complete", {
       searchTimeMs,
       totalSources,
-      searches: searchResults.map(({ query, category, results }) => ({
+      searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,
+        timeMs,
         sources: results.map(r => ({
           title: r.title,
           url: r.url,
@@ -338,9 +339,10 @@ app.post("/api/chat", async (req, res) => {
 
     res.json({
       content: finalResponse.choices[0].message.content,
-      searches: searchResults.map(({ query, category, results }) => ({
+      searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,
+        timeMs,
         sources: results.map((r) => ({
           title: r.title,
           url: r.url,
