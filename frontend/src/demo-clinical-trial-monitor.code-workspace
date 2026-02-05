@@ -1,0 +1,20 @@
+{
+	"folders": [
+		{
+			"path": "../../../demo-clinical-trial-monitor"
+		},
+		{
+			"path": "../.."
+		},
+		{
+			"path": "../../../demo-voice-search"
+		}
+	],
+	"settings": {
+		"explorer.decorations.colors": true,
+		"explorer.decorations.badges": true,
+		"git.decorations.enabled": true,
+		"typescript.tsdk": "node_modules/typescript/lib",
+		"typescript.enablePromptUseWorkspaceTsdk": true
+	}
+}

@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Plus, Copy } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight } from "lucide-react";
 import { ToggleElevated, CardGalleryItem } from "./components";
 import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
+import { PageHeader } from "./components/PageHeader";
 import { ASCIIBackground } from "./components/ASCIIBackground";
+import Button from "./components/Button";
 import Lottie from "lottie-react";
 import { getAssetPath, getApiPath } from "./lib/basePath";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
@@ -29,7 +31,6 @@ function App() {
   const [currentChatId, setCurrentChatId] = useState(chats[0].id);
   const [isLoading, setIsLoading] = useState(false);
   const [exaEnabled, setExaEnabled] = useState(true);
-  const [searchTiming, setSearchTiming] = useState(null);
   const [followups, setFollowups] = useState([]);
   const [model, setModel] = useState("google/gemini-2.5-flash");
   const messagesEndRef = useRef(null);
@@ -59,40 +60,50 @@ function App() {
     ));
   };
 
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  // Debounced scroll for smoother experience
+  const scrollTimeoutRef = useRef(null);
+  const isUserAtBottomRef = useRef(true);
+
+  const scrollToBottom = (behavior = "instant") => {
+    // Check if user is near bottom (within 100px)
+    const element = messagesEndRef.current?.parentElement;
+    if (element) {
+      const isNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 100;
+      isUserAtBottomRef.current = isNearBottom;
+    }
+
+    // Only auto-scroll if user is at bottom
+    if (isUserAtBottomRef.current) {
+      messagesEndRef.current?.scrollIntoView({ behavior });
+    }
+  };
+
+  const debouncedScroll = () => {
+    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    scrollTimeoutRef.current = setTimeout(() => {
+      // Use instant scroll during streaming for smoothness
+      const behavior = isLoading ? "instant" : "smooth";
+      scrollToBottom(behavior);
+    }, 150);
   };
 
   useEffect(() => {
-    scrollToBottom();
+    debouncedScroll();
+    return () => {
+      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
+    };
   }, [messages, isLoading]);
 
-  const handleSubmit = async (message, attachedFile = null) => {
-    if (!message.trim() && !attachedFile) return;
+  const handleSubmit = async (message) => {
+    if (!message.trim()) return;
 
     // Update chat title if first message
     if (messages.length === 0) {
-      updateChatTitle(currentChatId, message || attachedFile?.name || "New Chat");
+      updateChatTitle(currentChatId, message || "New Chat");
     }
 
-    // Build display message (what user sees in chat)
-    let displayContent = message;
-    if (attachedFile) {
-      const fileLabel = attachedFile.type === 'code' ? 'Code' : 'File';
-      displayContent = message
-        ? `${message}\n\n📎 ${fileLabel}: ${attachedFile.name}`
-        : `📎 ${fileLabel}: ${attachedFile.name}`;
-    }
-
-    // Build full message for server (includes file content)
-    let serverMessage = message;
-    if (attachedFile) {
-      const fileLabel = attachedFile.type === 'code' ? 'Code' : 'File';
-      serverMessage = `${message}\n\n[${fileLabel}: ${attachedFile.name}]\n\`\`\`\n${attachedFile.content}\n\`\`\``;
-    }
-
-    // Add user message (display version)
-    const userMessage = { role: "user", content: displayContent };
+    // Add user message
+    const userMessage = { role: "user", content: message };
     setMessages((prev) => [...prev, userMessage]);
     setIsLoading(true);
 
@@ -108,7 +119,7 @@ function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          message: serverMessage,
+          message: message,
           history: messages,
           exaEnabled,
           model,
@@ -127,9 +138,33 @@ function App() {
       let searchTimeMs = null;
       let totalSources = null;
 
+      // Batching for smoother streaming
+      let contentBuffer = "";
+      let batchTimeout = null;
+      const BATCH_DELAY = 16; // 16ms batching window (~60fps)
+
+      const flushContentBuffer = () => {
+        if (contentBuffer) {
+          const bufferedContent = contentBuffer;
+          contentBuffer = "";
+          setMessages((prev) =>
+            prev.map((msg) =>
+              msg.id === assistantMessageId
+                ? { ...msg, content: msg.content + bufferedContent }
+                : msg
+            )
+          );
+        }
+      };
+
       while (true) {
         const { done, value } = await reader.read();
-        if (done) break;
+        if (done) {
+          // Flush any remaining buffered content
+          if (batchTimeout) clearTimeout(batchTimeout);
+          flushContentBuffer();
+          break;
+        }
 
         buffer += decoder.decode(value, { stream: true });
         const lines = buffer.split("\n");
@@ -143,41 +178,33 @@ function App() {
           if (line.startsWith("data: ")) {
             const data = JSON.parse(line.slice(6));
 
-            // Handle search_start - mark message as searching
+            // Handle search_start - mark message as searching and save queries
             if (data.queries) {
+              // Flush content buffer before state change
+              if (batchTimeout) clearTimeout(batchTimeout);
+              flushContentBuffer();
+
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessageId
-                    ? { ...msg, searching: true }
+                    ? { ...msg, searching: true, queries: data.queries }
                     : msg
                 )
               );
             }
 
             if (data.content) {
-              // Append content to streaming message
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, content: msg.content + data.content }
-                    : msg
-                )
-              );
+              // Batch content updates for smoother streaming
+              contentBuffer += data.content;
+
+              if (batchTimeout) clearTimeout(batchTimeout);
+              batchTimeout = setTimeout(flushContentBuffer, BATCH_DELAY);
             }
 
             if (data.searches) {
               searches = data.searches;
               searchTimeMs = data.searchTimeMs;
               totalSources = data.totalSources;
-
-              // Show timing badge
-              setSearchTiming({ sources: totalSources, timeMs: searchTimeMs, fadeOut: false });
-              setTimeout(() => {
-                setSearchTiming((prev) => (prev ? { ...prev, fadeOut: true } : null));
-              }, 1500);
-              setTimeout(() => {
-                setSearchTiming(null);
-              }, 1900);
             }
 
             if (data.exaUsed !== undefined) {
@@ -232,75 +259,34 @@ function App() {
         <div className="fixed inset-0 z-0 bg-white" />
       )}
 
-      {/* Top Header - Exa Chatbot Demo */}
-      <header className="relative z-20 border-b border-[#e5e5e5] bg-white py-6 md:py-8 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-        <div className="flex items-start justify-between px-6 md:px-12 lg:px-20">
-          {/* Left side - Logo and Title */}
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-7 w-7" />
-              <span className="text-[18px] font-medium text-[#000911]">exa</span>
-            </div>
-            <h1 className="font-[family-name:var(--font-family-arizona)] text-3xl md:text-4xl tracking-tight text-[#000911] mb-2">
-              Exa Chatbot Demo
-            </h1>
-            <p className="text-[#60646c] text-[16px] md:text-[17px]">
-              AI chatbot with real-time web search powered by Exa
-            </p>
-          </div>
-
-          {/* Right side - Exa Toggle and How It Works button */}
-          <div className="flex items-center gap-4 pr-4 md:pr-8 lg:pr-12">
-            <ToggleElevated
-              options={["Exa ON", "Exa OFF"]}
-              tooltips={{
-                "Exa ON": "Search the web for real-time information",
-                "Exa OFF": "Answer from model knowledge only",
-              }}
-              value={exaEnabled ? "Exa ON" : "Exa OFF"}
-              onChange={(val) => setExaEnabled(val === "Exa ON")}
-            />
-            <Link
-              to="/tutorial"
-              className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-white px-5 py-2.5 text-[14px] font-medium text-[#000911] hover:border-[#0040f0] hover:text-[#0040f0] transition-colors shadow-sm"
+      <PageHeader
+        title="Exa Chatbot Demo"
+        subtitle="AI chatbot with real-time web search powered by Exa"
+        rightContent={
+          <Link to="/tutorial">
+            <Button
+              variant="default"
+              size="sm"
+              icon={ArrowRight}
+              iconPosition="end"
+              className="w-[140px] justify-between"
             >
-              <span>How It Works</span>
-              <span>→</span>
-            </Link>
-          </div>
-        </div>
-      </header>
-
-      {/* Chat Header - New Chat Button */}
-      <div className="relative z-10 bg-white/80 backdrop-blur-sm">
-        <div className="flex items-center px-4 py-3">
-          <button
-            onClick={createNewChat}
-            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[#f4f4f5]"
-            title="New chat"
-          >
-            <Plus size={20} className="text-[#60646c]" />
-          </button>
-        </div>
-      </div>
+              How It Works
+            </Button>
+          </Link>
+        }
+      />
 
       {/* Chat Area */}
       <main className="relative z-[1] flex-1 overflow-y-auto">
         <div className="mx-auto max-w-4xl px-6 py-8">
           {messages.length === 0 ? (
-            <EmptyState onSubmit={handleSubmit} suggestions={DEFAULT_SUGGESTIONS} disabled={isLoading} model={model} onModelChange={setModel} exaEnabled={exaEnabled} />
+            <EmptyState onSubmit={handleSubmit} suggestions={DEFAULT_SUGGESTIONS} disabled={isLoading} exaEnabled={exaEnabled} />
           ) : (
             <div className="space-y-6">
               {messages.map((msg, i) => (
                 <Message key={i} message={msg} />
               ))}
-              {searchTiming && (
-                <ExaTimingBadge
-                  sources={searchTiming.sources}
-                  timeMs={searchTiming.timeMs}
-                  fadeOut={searchTiming.fadeOut}
-                />
-              )}
               <div ref={messagesEndRef} />
             </div>
           )}
@@ -312,13 +298,10 @@ function App() {
         <footer className="relative z-[1] sticky bottom-0 border-t border-[#e5e5e5] bg-white/80 backdrop-blur-sm">
           <div className="mx-auto max-w-4xl px-6 py-4">
             <ChatInputBlue
-              placeholder="Explore anywhere..."
+              placeholder="Ask about anything on the web..."
               tags={followups.length > 0 ? followups : DEFAULT_SUGGESTIONS}
               onSubmit={handleSubmit}
               disabled={isLoading}
-              model={model}
-              onModelChange={setModel}
-              dropdownDirection="up"
             />
           </div>
         </footer>
@@ -327,45 +310,54 @@ function App() {
   );
 }
 
-// Scenic images for empty state (5.jpg and 9.jpg removed)
-const scenicImages = [1,2,3,4,6,7,8,10,11,12,13,14,15,16,17,18,19,20].map(n => getAssetPath(`/scenic/${n}.jpg`));
+// Multi-hop search nudges for empty state
+const SEARCH_NUDGES = [
+  {
+    title: "Multi-source Analysis",
+    prompt: "Compare the latest climate policies from the US, EU, and China"
+  },
+  {
+    title: "Emerging Trends",
+    prompt: `What are the most promising AI safety breakthroughs from ${new Date().getFullYear()}?`
+  },
+  {
+    title: "Market Intelligence",
+    prompt: "Which YC-backed startups in autonomous vehicles raised funding this month?"
+  }
+];
 
 // Empty state component with centered input
-function EmptyState({ onSubmit, suggestions, disabled, model, onModelChange, exaEnabled }) {
-  const [currentImage, setCurrentImage] = useState(0);
-
-  useEffect(() => {
-    if (!exaEnabled) return; // Don't run interval when Exa is off
-    const interval = setInterval(() => {
-      setCurrentImage((prev) => (prev + 1) % scenicImages.length);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [exaEnabled]);
-
+function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center text-center -mt-8">
-      {/* Fixed height container to keep input position consistent */}
-      <div className="h-56 flex items-end justify-center mb-8">
-        {exaEnabled ? (
-          <div className="h-48 w-80 overflow-hidden rounded-xl shadow-lg">
-            <img
-              key={currentImage}
-              src={scenicImages[currentImage]}
-              alt="Scenic destination"
-              className="h-full w-full object-cover animate-flicker"
-            />
-          </div>
-        ) : null}
-      </div>
-      <div className="w-full max-w-xl">
-        <ChatInputBlue
-          placeholder={exaEnabled ? "Explore anywhere..." : "Model only"}
-          tags={suggestions}
-          onSubmit={onSubmit}
-          disabled={disabled}
-          model={model}
-          onModelChange={onModelChange}
-        />
+      <div className="w-full max-w-4xl mx-auto px-6">
+        <div className="rounded-2xl bg-[#fafafa] border border-[#f0f0f0] p-8">
+          {/* Search Nudges */}
+          {exaEnabled && (
+            <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+              {SEARCH_NUDGES.map((nudge, i) => (
+                <button
+                  key={i}
+                  onClick={() => onSubmit(nudge.prompt)}
+                  disabled={disabled}
+                  className="group relative rounded-xl border border-[#e5e5e5] bg-white p-6 text-left transition-all hover:border-[#0040f0] hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="mb-2 text-sm font-medium text-[#60646c]">{nudge.title}</div>
+                  <div className="text-sm text-[#000911] group-hover:text-[#0040f0] transition-colors">
+                    {nudge.prompt}
+                  </div>
+                </button>
+              ))}
+            </div>
+          )}
+
+          <ChatInputBlue
+            placeholder="Ask about anything on the web..."
+            tags={suggestions}
+            onSubmit={onSubmit}
+            disabled={disabled}
+          />
+        </div>
       </div>
     </div>
   );
@@ -401,11 +393,10 @@ const SEARCH_PHRASES = [
 const getRandomSearchPhrase = () =>
   SEARCH_PHRASES[Math.floor(Math.random() * SEARCH_PHRASES.length)];
 
-// Concentric rings loading indicator
 // Gradient loader Lottie animation URL
 const LOADER_LOTTIE = "https://assets-v2.lottiefiles.com/a/ca974640-116b-11ee-9862-ff8858832394/c8bJzzfgZt.json";
 
-function LoadingRings({ searching = false }) {
+function LoadingRings({ searching = false, queries = [] }) {
   // Pick a random phrase once when searching becomes true
   const [searchPhrase] = useState(getRandomSearchPhrase);
   const [animationData, setAnimationData] = useState(null);
@@ -418,6 +409,23 @@ function LoadingRings({ searching = false }) {
       .then(data => setAnimationData(data))
       .catch(err => console.error("Failed to load animation:", err));
   }, []);
+
+  // If we have queries, show them instead of generic loading text
+  if (searching && queries && queries.length > 0) {
+    return (
+      <div className="animate-message-in space-y-3 max-w-[85%]">
+        {queries.map((query, i) => (
+          <div
+            key={i}
+            className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2.5 animate-pulse"
+          >
+            <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+            <span className="text-[13px] text-[#000911]">{query}</span>
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   return (
     <div className="animate-message-in">
@@ -446,16 +454,77 @@ function LoadingRings({ searching = false }) {
   );
 }
 
+// Search Query Row component - shows Exa queries with expandable sources
+function SearchQueryRow({ query, category, sources = [], timeMs }) {
+  const [expanded, setExpanded] = useState(false);
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2 text-left transition-all hover:border-[#0040f0] hover:bg-white w-full"
+      >
+        <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+        <span className="text-[13px] text-[#000911] flex-1">{query}</span>
+        {category && (
+          <span className="rounded bg-[#f0f0f0] px-2 py-0.5 text-[11px] text-[#60646c]">
+            {category}
+          </span>
+        )}
+        {sources.length > 0 && (
+          <span className="text-[11px] text-[#60646c]">
+            {sources.length} {sources.length === 1 ? 'source' : 'sources'}
+            {timeMs && ` · ${timeMs}ms`}
+          </span>
+        )}
+        {sources.length > 0 && (
+          expanded ? (
+            <ChevronDown size={16} className="text-[#60646c]" />
+          ) : (
+            <ChevronRight size={16} className="text-[#60646c]" />
+          )
+        )}
+      </button>
+
+      {expanded && sources.length > 0 && (
+        <div className="mt-2 space-y-2 animate-sources-expand">
+          {sources.map((source, j) => (
+            <a
+              key={j}
+              href={source.url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="flex items-start gap-2 rounded-lg border border-[#e5e5e5] bg-[#faf9f8] p-3 transition-colors hover:border-[#d4d4d4]"
+            >
+              <img
+                src={`https://www.google.com/s2/favicons?domain=${new URL(source.url).hostname}&sz=32`}
+                alt=""
+                className="mt-0.5 h-4 w-4 shrink-0 rounded"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-[13px] font-medium text-[#000911]">
+                  {source.title || "Untitled"}
+                </p>
+                <p className="text-[11px] text-[#60646c]">
+                  <span className="font-medium text-[#0040f0]">{getDomain(source.url)}</span>
+                  {source.date && ` · ${source.date.slice(0, 10)}`}
+                  {source.author && ` · ${source.author}`}
+                </p>
+              </div>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Message component
 function Message({ message }) {
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
-
-  // Show loading rings for empty streaming messages
-  if (message.streaming && !message.content) {
-    return <LoadingRings searching={message.searching} />;
-  }
 
   const handleCopy = async () => {
     // Strip out chart and followup blocks for cleaner copy
@@ -469,10 +538,37 @@ function Message({ message }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  // Show "Thinking..." for initial loading
+  if (message.streaming && !message.content && !message.queries && !message.searches) {
+    return <LoadingRings searching={false} queries={[]} />;
+  }
+
+  // Show "Searching for" with queries during search phase (before content arrives)
+  if (message.streaming && !message.content && message.queries && message.queries.length > 0) {
+    return (
+      <div className="animate-message-in">
+        <div className="inline-flex flex-col gap-2 px-1 py-2">
+          <span className="text-[13px] text-[#60646c] mb-1">Searching for</span>
+          <div className="space-y-2">
+            {message.queries.map((query, i) => (
+              <div
+                key={i}
+                className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2 animate-pulse"
+              >
+                <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+                <span className="text-[13px] text-[#000911]">{query}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`animate-message-in ${isUser ? "flex justify-end" : ""}`}>
       <div
-        className={`group relative max-w-[85%] rounded-[12px] ${
+        className={`relative max-w-[85%] rounded-[12px] ${
           isUser
             ? "bg-[#000911] px-4 py-3 text-white"
             : message.error
@@ -497,73 +593,18 @@ function Message({ message }) {
           <>
             <MessageContent content={message.content} />
 
-            {/* Sources section */}
-            {message.searches && message.searches.length > 0 && (
+            {/* Search queries at bottom - only show when complete */}
+            {!message.streaming && message.searches && message.searches.length > 0 && (
               <div className="mt-4 border-t border-[#e5e5e5] pt-4">
-                <button
-                  onClick={() => setSourcesExpanded(!sourcesExpanded)}
-                  className="flex w-full items-center justify-between text-left"
-                >
-                  <div className="flex items-center gap-2">
-                    <Search size={14} className="text-[#0040f0]" />
-                    <span className="text-[13px] font-medium text-[#000911]">
-                      {message.searches.reduce((acc, s) => acc + s.sources.length, 0)} sources from{" "}
-                      {message.searches.length} {message.searches.length === 1 ? "search" : "searches"}
-                      {message.searchTimeMs && (
-                        <span className="ml-1 font-normal text-[#60646c]">in {message.searchTimeMs}ms</span>
-                      )}
-                    </span>
-                  </div>
-                  {sourcesExpanded ? (
-                    <ChevronDown size={16} className="text-[#60646c]" />
-                  ) : (
-                    <ChevronRight size={16} className="text-[#60646c]" />
-                  )}
-                </button>
-
-                {sourcesExpanded && (
-                  <div className="mt-3 space-y-4 animate-sources-expand">
-                    {message.searches.map((search, i) => (
-                      <div key={i}>
-                        <p className="mb-2 text-[12px] text-[#60646c]">
-                          "{search.query}"{search.category && (
-                            <span className="ml-2 rounded bg-[#f4f4f5] px-1.5 py-0.5 text-[11px]">
-                              {search.category}
-                            </span>
-                          )}
-                        </p>
-                        <div className="space-y-2">
-                          {search.sources.map((source, j) => (
-                            <a
-                              key={j}
-                              href={source.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="flex items-start gap-2 rounded-lg border border-[#e5e5e5] bg-[#faf9f8] p-3 transition-colors hover:border-[#d4d4d4]"
-                            >
-                              <img
-                                src={`https://www.google.com/s2/favicons?domain=${new URL(source.url).hostname}&sz=32`}
-                                alt=""
-                                className="mt-0.5 h-4 w-4 shrink-0 rounded"
-                                onError={(e) => { e.target.style.display = 'none'; }}
-                              />
-                              <div className="min-w-0 flex-1">
-                                <p className="truncate text-[13px] font-medium text-[#000911]">
-                                  {source.title || "Untitled"}
-                                </p>
-                                <p className="text-[11px] text-[#60646c]">
-                                  <span className="font-medium text-[#0040f0]">{getDomain(source.url)}</span>
-                                  {source.date && ` · ${source.date.slice(0, 10)}`}
-                                  {source.author && ` · ${source.author}`}
-                                </p>
-                              </div>
-                            </a>
-                          ))}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+                {message.searches.map((search, i) => (
+                  <SearchQueryRow
+                    key={i}
+                    query={search.query}
+                    category={search.category}
+                    sources={search.sources || []}
+                    timeMs={search.timeMs}
+                  />
+                ))}
               </div>
             )}
 
@@ -816,31 +857,6 @@ function ChartRenderer({ data }) {
     <div className="mt-4 rounded-lg border border-[#e5e5e5] bg-white p-5">
       <div className="max-w-lg mx-auto">
         <ChartComponent data={chartData} options={options} />
-      </div>
-    </div>
-  );
-}
-
-// Exa timing badge
-function ExaTimingBadge({ sources, timeMs, fadeOut }) {
-  return (
-    <div className="animate-message-in">
-      <div className={`exa-timing-badge ${fadeOut ? 'fade-out' : ''}`}>
-        <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" />
-        <span>found {sources} sources in {timeMs}ms</span>
-      </div>
-    </div>
-  );
-}
-
-// Loading indicator
-function LoadingIndicator() {
-  return (
-    <div className="animate-message-in">
-      <div className="inline-flex items-center gap-1 rounded-[12px] border border-[#e5e5e5] bg-white px-4 py-3 shadow-[var(--shadow-card)]">
-        <div className="h-2 w-2 rounded-full bg-[#0040f0] animate-bounce-dot-1" />
-        <div className="h-2 w-2 rounded-full bg-[#0040f0] animate-bounce-dot-2" />
-        <div className="h-2 w-2 rounded-full bg-[#0040f0] animate-bounce-dot-3" />
       </div>
     </div>
   );

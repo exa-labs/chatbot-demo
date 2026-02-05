@@ -56,11 +56,17 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5) {
 }
 
 async function searchMultiple(searches) {
-  const searchPromises = searches.map(({ query, category, maxAgeOverride, numResults = 10 }) =>
-    searchExa(query, category, maxAgeOverride, numResults)
-      .then(results => ({ query, category, results }))
-      .catch(err => ({ query, category, results: [], error: err.message }))
-  );
+  const searchPromises = searches.map(async ({ query, category, maxAgeOverride, numResults = 5 }) => {
+    const startTime = Date.now();
+    try {
+      const results = await searchExa(query, category, maxAgeOverride, numResults);
+      const timeMs = Date.now() - startTime;
+      return { query, category, results, timeMs };
+    } catch (err) {
+      const timeMs = Date.now() - startTime;
+      return { query, category, results: [], error: err.message, timeMs };
+    }
+  });
 
   return Promise.all(searchPromises);
 }
@@ -132,8 +138,8 @@ const searchTool = {
 
 RESULT COUNT - Choose based on query complexity:
 - Simple factual query (price, score, single fact): numResults = 5
-- Normal query (news, what someone said, general info): numResults = 10
-- Complex query needing depth (research, comparisons, comprehensive analysis): use multiple searches with numResults = 10 each
+- Normal query (news, what someone said, general info): numResults = 5
+- Complex query needing depth (research, comparisons, comprehensive analysis): use multiple searches with numResults = 5 each
 
 CATEGORIES - Use sparingly:
 - company: ONLY for "what does X company do" or company research
@@ -150,7 +156,7 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
             type: "object",
             properties: {
               query: { type: "string", description: "Natural language query. Use correct year for time-relative questions." },
-              numResults: { type: "number", description: "Number of results: 5 for simple, 10 for normal/complex. Default 10.", default: 10 },
+              numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
               category: {
                 type: "string",
                 enum: ["company", "people", "research_paper"],
@@ -228,7 +234,7 @@ export default async function handler(req, res) {
       return res.json({ content: "I tried to search but couldn't form a valid query. Please try rephrasing.", searches: null, exaUsed: false });
     }
 
-    console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 10} results)`).join(", ")}`);
+    console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 5} results)`).join(", ")}`);
     const searchStart = Date.now();
     const searchResults = await searchMultiple(allSearches);
     const searchTimeMs = Date.now() - searchStart;
@@ -265,9 +271,10 @@ export default async function handler(req, res) {
 
     res.json({
       content: finalResponse.choices[0].message.content,
-      searches: searchResults.map(({ query, category, results }) => ({
+      searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,
+        timeMs,
         sources: results.map((r) => ({
           title: r.title,
           url: r.url,

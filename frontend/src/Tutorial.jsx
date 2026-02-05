@@ -1,7 +1,9 @@
 import { useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, Copy, Check, FileText } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Copy, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { PageHeader } from "./components/PageHeader";
+import Button from "./components/Button";
 
 const PAGE_CONTENT_FOR_LLM = `# Chatbot with Web Search
 
@@ -19,7 +21,7 @@ GitHub repo: https://github.com/exa-labs/chatbot-demo
 
 ## Why Exa in a chatbot?
 
-Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal passion project, imbuing Exa yields massive gains:
+Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal project, imbuing Exa yields massive gains:
 
 1. Model agnostic: Works with OpenAI, Anthropic, or any open-source model
 2. Superior search: Faster, more relevant, and more comprehensive than model search calling
@@ -65,7 +67,7 @@ const searchTool = {
             type: "object",
             properties: {
               query: { type: "string", description: "Search query" },
-              numResults: { type: "number", default: 10 },
+              numResults: { type: "number", default: 5 },
               category: {
                 type: "string",
                 enum: ["company", "people", "research_paper"],
@@ -167,27 +169,6 @@ That's it! The model now decides when to search, executes Exa queries for real-t
 Get started with Exa for free: https://dashboard.exa.ai/overview
 `;
 
-function CopyPageButton() {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(PAGE_CONTENT_FOR_LLM);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="inline-flex items-center gap-2 rounded-md border border-[#e5e5e5] bg-white px-3 py-1.5 text-sm text-[#60646c] hover:bg-[#f4f4f5] hover:text-[#000911] transition-colors"
-      title="Copy page content for LLMs"
-    >
-      {copied ? <Check size={14} className="text-green-600" /> : <FileText size={14} />}
-      <span>{copied ? "Copied!" : "Copy page"}</span>
-    </button>
-  );
-}
-
 const codeStyle = {
   'code[class*="language-"]': {
     color: '#000911',
@@ -282,55 +263,30 @@ function Step({ number, title, children }) {
 export default function Tutorial() {
   return (
     <div className="min-h-screen bg-white">
-      {/* Header */}
-      <header className="sticky top-0 z-10 border-b border-[#e5e5e5] bg-white/80 backdrop-blur-sm">
-        <div className="mx-auto max-w-4xl px-6 py-4">
-          <Link
-            to="/"
-            className="inline-flex items-center gap-2 text-[#60646c] hover:text-[#000911] transition-colors"
-          >
-            <ArrowLeft size={18} />
-            <span>Back to Chat</span>
+      <PageHeader
+        title="Chatbot with Web Search"
+        subtitle="Build an AI chatbot that intelligently calls Exa to search the web for real-time information"
+        rightContent={
+          <Link to="/">
+            <Button
+              variant="default"
+              size="sm"
+              icon={ArrowLeft}
+              iconPosition="start"
+            >
+              Back to Chat
+            </Button>
           </Link>
-        </div>
-      </header>
+        }
+      />
 
       {/* Content */}
       <main className="mx-auto max-w-4xl px-6 py-12">
-        {/* Title */}
-        <div className="flex items-start justify-between gap-4 mb-4">
-          <h1 className="text-4xl font-bold text-[#000911]">Chatbot with Web Search</h1>
-          <CopyPageButton />
-        </div>
-        <p className="text-xl text-[#60646c] mb-8">Build an AI chatbot that intelligently calls Exa to search the web for real-time information.</p>
-
-        <hr className="my-8 border-[#e5e5e5]" />
-
-        {/* Intro */}
-        <p className="text-[16px] text-[#000911] mb-6">
-          In this tutorial, we'll build a chatbot where the model decides when to search. No complex orchestration—just a tool definition and a system prompt. The model handles all the logic.
-        </p>
-
-        <ol className="list-decimal list-inside mb-6 text-[#000911] space-y-2">
-          <li>Define a search tool the model can call</li>
-          <li>Use <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">exa.search</code> with <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">text: true</code> to get search results with page contents</li>
-          <li>Let the model decide when to search vs answer from training data</li>
-        </ol>
-
-        <p className="text-[16px] text-[#000911] mb-8">
-          Check out the{" "}
-          <a href="https://github.com/exa-labs/chatbot-demo" target="_blank" rel="noopener noreferrer" className="text-[#0040f0] hover:underline">
-            GitHub repo
-          </a>{" "}
-          for the complete implementation.
-        </p>
-
-        <hr className="my-8 border-[#e5e5e5]" />
 
         {/* Why Exa */}
         <h2 className="text-2xl font-bold text-[#000911] mb-4">Why Exa in a chatbot?</h2>
         <p className="text-[16px] text-[#000911] mb-4">
-          Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal passion project, <em>imbuing Exa yields massive gains:</em>
+          Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal project, <em>imbuing Exa yields massive gains:</em>
         </p>
 
         <ol className="list-decimal list-inside mb-8 text-[#000911] space-y-2">
@@ -375,10 +331,9 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });`} />
     name: "web_search",
     description: \`Search the web via Exa. Write queries as natural language.
 
-RESULT COUNT - Choose based on query complexity:
-- Simple factual query (price, score, single fact): numResults = 5
-- Normal query (news, what someone said, general info): numResults = 10
-- Complex query needing depth: use multiple searches with numResults = 10 each
+RESULT COUNT:
+- Default: numResults = 5 (use this for most queries)
+- Complex queries needing depth: use multiple focused searches with numResults = 5 each
 
 CATEGORIES - Use sparingly:
 - company: ONLY for "what does X company do" or company research
@@ -395,7 +350,7 @@ For news, sports, general facts, quotes - DO NOT use a category.\`,
             type: "object",
             properties: {
               query: { type: "string" },
-              numResults: { type: "number", default: 10 },
+              numResults: { type: "number", default: 5 },
               category: {
                 type: "string",
                 enum: ["company", "people", "research_paper"],
