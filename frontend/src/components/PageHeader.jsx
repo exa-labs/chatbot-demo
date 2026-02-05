@@ -1,5 +1,5 @@
 import { Link } from "react-router-dom";
-import { getAssetPath } from "../lib/basePath";
+import exaLogo from "../assets/exa_logo.png";
 
 export function PageHeader({ title, subtitle, rightContent }) {
   return (
@@ -8,7 +8,7 @@ export function PageHeader({ title, subtitle, rightContent }) {
         <div className="flex items-center justify-between mb-4">
           <Link to="/">
             <img
-              src={getAssetPath("/exa_logo.png")}
+              src={exaLogo}
               alt="Exa"
               width={60}
               height={20}
