@@ -3,7 +3,7 @@ import { getAssetPath } from "../lib/basePath";
 
 export function PageHeader({ title, subtitle, rightContent }) {
   return (
-    <header className="relative z-[1] border-b border-[#e5e5e5] bg-white py-6 md:py-8 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
+    <header className="relative z-[1] bg-white py-6 md:py-8">
       <div className="mx-auto max-w-7xl px-6 md:px-12 lg:px-20">
         <div className="flex items-start justify-between">
           {/* Left side - Logo and Title */}
