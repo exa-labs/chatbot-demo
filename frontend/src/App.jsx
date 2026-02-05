@@ -3,6 +3,7 @@ import { Link } from "react-router-dom";
 import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight } from "lucide-react";
 import { ToggleElevated, CardGalleryItem } from "./components";
 import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
+import { PageHeader } from "./components/PageHeader";
 import { ASCIIBackground } from "./components/ASCIIBackground";
 import Button from "./components/Button";
 import Lottie from "lottie-react";
@@ -217,44 +218,23 @@ function App() {
         <div className="fixed inset-0 z-0 bg-white" />
       )}
 
-      {/* Top Header - Exa Chatbot Demo */}
-      <header className="relative z-20 bg-white pt-8 pb-12">
-        <div className="mx-auto max-w-7xl px-6 lg:px-8">
-          <div className="flex items-center justify-between mb-4">
-            <Link to="/">
-              <img
-                src={getAssetPath("/exa_logo.png")}
-                alt="Exa"
-                className="h-5 w-auto"
-              />
-            </Link>
-
-            {/* Right side - How It Works button */}
-            <div className="flex items-center gap-2">
-              <Link to="/tutorial">
-                <Button
-                  variant="default"
-                  size="sm"
-                  icon={ArrowRight}
-                  iconPosition="end"
-                  className="w-[140px] justify-between"
-                >
-                  How It Works
-                </Button>
-              </Link>
-            </div>
-          </div>
-
-          <div>
-            <h1 className="font-[family-name:var(--font-family-arizona)] text-4xl tracking-tight text-black sm:text-5xl">
-              Exa Chatbot Demo
-            </h1>
-            <p className="mt-4 text-lg text-black/60">
-              AI chatbot with real-time web search powered by Exa
-            </p>
-          </div>
-        </div>
-      </header>
+      <PageHeader
+        title="Exa Chatbot Demo"
+        subtitle="AI chatbot with real-time web search powered by Exa"
+        rightContent={
+          <Link to="/tutorial">
+            <Button
+              variant="default"
+              size="sm"
+              icon={ArrowRight}
+              iconPosition="end"
+              className="w-[140px] justify-between"
+            >
+              How It Works
+            </Button>
+          </Link>
+        }
+      />
 
       {/* Chat Area */}
       <main className="relative z-[1] flex-1 overflow-y-auto">
@@ -304,7 +284,7 @@ const SEARCH_NUDGES = [
   },
   {
     title: "Emerging Trends",
-    prompt: "What are the most promising AI safety breakthroughs from 2025?"
+    prompt: `What are the most promising AI safety breakthroughs from ${new Date().getFullYear()}?`
   },
   {
     title: "Market Intelligence",
@@ -424,6 +404,49 @@ function LoadingRings({ searching = false }) {
   );
 }
 
+// Search Query Row component - shows Exa queries with expandable cURL
+function SearchQueryRow({ query, category }) {
+  const [showCurl, setShowCurl] = useState(false);
+
+  // Generate cURL command for this search
+  const curlCommand = `curl -X POST https://api.exa.ai/search \\
+  -H "x-api-key: YOUR_API_KEY" \\
+  -H "Content-Type: application/json" \\
+  -d '{
+    "query": "${query}",
+    ${category ? `"category": "${category}",` : ''}
+    "numResults": 10,
+    "contents": {
+      "text": true
+    }
+  }'`;
+
+  return (
+    <div className="mb-3">
+      <button
+        onClick={() => setShowCurl(!showCurl)}
+        className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2 text-left transition-all hover:border-[#0040f0] hover:bg-white w-full"
+      >
+        <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-4 w-4 shrink-0" />
+        <span className="text-[13px] text-[#000911] flex-1">{query}</span>
+        {category && (
+          <span className="rounded bg-[#f0f0f0] px-2 py-0.5 text-[11px] text-[#60646c]">
+            {category}
+          </span>
+        )}
+      </button>
+
+      {showCurl && (
+        <div className="mt-2 rounded-lg bg-[#282c34] p-3 overflow-x-auto">
+          <pre className="text-[11px] text-[#abb2bf] font-mono whitespace-pre">
+            {curlCommand}
+          </pre>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Message component
 function Message({ message }) {
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
@@ -473,6 +496,15 @@ function Message({ message }) {
           <p className="text-[14px]">{message.content}</p>
         ) : (
           <>
+            {/* Search queries - show at the top */}
+            {message.searches && message.searches.length > 0 && (
+              <div className="mb-4">
+                {message.searches.map((search, i) => (
+                  <SearchQueryRow key={i} query={search.query} category={search.category} />
+                ))}
+              </div>
+            )}
+
             <MessageContent content={message.content} />
 
             {/* Sources section */}

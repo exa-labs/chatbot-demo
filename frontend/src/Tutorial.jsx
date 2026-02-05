@@ -1,8 +1,8 @@
 import { useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, Copy, Check, FileText } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Copy, Check } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { getAssetPath } from "./lib/basePath";
+import { PageHeader } from "./components/PageHeader";
 
 const PAGE_CONTENT_FOR_LLM = `# Chatbot with Web Search
 
@@ -168,27 +168,6 @@ That's it! The model now decides when to search, executes Exa queries for real-t
 Get started with Exa for free: https://dashboard.exa.ai/overview
 `;
 
-function CopyPageButton() {
-  const [copied, setCopied] = useState(false);
-
-  const handleCopy = async () => {
-    await navigator.clipboard.writeText(PAGE_CONTENT_FOR_LLM);
-    setCopied(true);
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  return (
-    <button
-      onClick={handleCopy}
-      className="inline-flex items-center gap-2 rounded-md border border-[#e5e5e5] bg-white px-3 py-1.5 text-sm text-[#60646c] hover:bg-[#f4f4f5] hover:text-[#000911] transition-colors"
-      title="Copy page content for LLMs"
-    >
-      {copied ? <Check size={14} className="text-green-600" /> : <FileText size={14} />}
-      <span>{copied ? "Copied!" : "Copy page"}</span>
-    </button>
-  );
-}
-
 const codeStyle = {
   'code[class*="language-"]': {
     color: '#000911',
@@ -283,40 +262,22 @@ function Step({ number, title, children }) {
 export default function Tutorial() {
   return (
     <div className="min-h-screen bg-white">
-      {/* Header */}
-      <header className="border-b border-[#e5e5e5] bg-white py-6 md:py-8 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-        <div className="flex items-start justify-between px-6 md:px-12 lg:px-20">
-          {/* Left side - Logo and Title */}
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-7 w-7" />
-              <span className="text-[18px] font-medium text-[#000911]">exa</span>
-            </div>
-            <h1 className="font-[family-name:var(--font-family-arizona)] text-3xl md:text-4xl tracking-tight text-[#000911] mb-2">
-              Chatbot with Web Search
-            </h1>
-            <p className="text-[#60646c] text-[16px] md:text-[17px]">
-              Build an AI chatbot that intelligently calls Exa to search the web for real-time information
-            </p>
-          </div>
-
-          {/* Right side - Back button and Copy button */}
-          <div className="flex items-center gap-4 pr-4 md:pr-8 lg:pr-12">
-            <CopyPageButton />
-            <Link
-              to="/"
-              className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-white px-5 py-2.5 text-[14px] font-medium text-[#000911] hover:border-[#0040f0] hover:text-[#0040f0] transition-colors shadow-sm"
-            >
-              <ArrowLeft size={16} />
-              <span>Back to Chat</span>
-            </Link>
-          </div>
-        </div>
-      </header>
+      <PageHeader
+        title="Chatbot with Web Search"
+        subtitle="Build an AI chatbot that intelligently calls Exa to search the web for real-time information"
+        rightContent={
+          <Link
+            to="/"
+            className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-white px-5 py-2.5 text-[14px] font-medium text-[#000911] hover:border-[#0040f0] hover:text-[#0040f0] transition-colors shadow-sm"
+          >
+            <ArrowLeft size={16} />
+            <span>Back to Chat</span>
+          </Link>
+        }
+      />
 
       {/* Content */}
       <main className="mx-auto max-w-4xl px-6 py-12">
-        <hr className="my-8 border-[#e5e5e5]" />
 
         {/* Intro */}
         <p className="text-[16px] text-[#000911] mb-6">
