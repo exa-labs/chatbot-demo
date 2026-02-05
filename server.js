@@ -23,10 +23,9 @@ const searchTool = {
     name: "web_search",
     description: `Search the web via Exa. Write queries as natural language (not keywords).
 
-RESULT COUNT - Choose based on query complexity:
-- Simple factual query (price, score, single fact): numResults = 5
-- Normal query (news, what someone said, general info): numResults = 10
-- Complex query needing depth (research, comparisons, comprehensive analysis): use multiple searches with numResults = 10 each
+RESULT COUNT:
+- Default: numResults = 5 (use this for most queries)
+- Complex queries needing depth: use multiple focused searches with numResults = 5 each
 
 CATEGORIES - Use sparingly:
 - company: ONLY for "what does X company do" or company research
@@ -43,7 +42,7 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
             type: "object",
             properties: {
               query: { type: "string", description: "Natural language query. Use correct year for time-relative questions." },
-              numResults: { type: "number", description: "Number of results: 5 for simple, 10 for normal/complex. Default 10.", default: 10 },
+              numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
               category: {
                 type: "string",
                 enum: ["company", "people", "research_paper"],
@@ -52,7 +51,7 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
             },
             required: ["query"]
           },
-          description: "1-3 searches to run in parallel. Use multiple searches with 10 results each for complex queries needing comprehensive coverage.",
+          description: "1-3 searches to run in parallel. Use multiple searches with 5 results each for complex queries needing comprehensive coverage.",
           maxItems: 3,
         },
       },

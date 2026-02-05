@@ -37,7 +37,7 @@ The model receives a `web_search` tool that accepts 1-3 parallel searches:
 ```javascript
 {
   searches: [
-    { query: "natural language query", numResults: 10, category?: "company" }
+    { query: "natural language query", numResults: 5, category?: "company" }
   ]
 }
 ```

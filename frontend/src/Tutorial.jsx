@@ -3,6 +3,7 @@ import { ArrowLeft, ChevronDown, ChevronRight, Copy, Check } from "lucide-react"
 import { Link } from "react-router-dom";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { PageHeader } from "./components/PageHeader";
+import Button from "./components/Button";
 
 const PAGE_CONTENT_FOR_LLM = `# Chatbot with Web Search
 
@@ -66,7 +67,7 @@ const searchTool = {
             type: "object",
             properties: {
               query: { type: "string", description: "Search query" },
-              numResults: { type: "number", default: 10 },
+              numResults: { type: "number", default: 5 },
               category: {
                 type: "string",
                 enum: ["company", "people", "research_paper"],
@@ -266,39 +267,21 @@ export default function Tutorial() {
         title="Chatbot with Web Search"
         subtitle="Build an AI chatbot that intelligently calls Exa to search the web for real-time information"
         rightContent={
-          <Link
-            to="/"
-            className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-white px-5 py-2.5 text-[14px] font-medium text-[#000911] hover:border-[#0040f0] hover:text-[#0040f0] transition-colors shadow-sm"
-          >
-            <ArrowLeft size={16} />
-            <span>Back to Chat</span>
+          <Link to="/">
+            <Button
+              variant="default"
+              size="sm"
+              icon={ArrowLeft}
+              iconPosition="start"
+            >
+              Back to Chat
+            </Button>
           </Link>
         }
       />
 
       {/* Content */}
       <main className="mx-auto max-w-4xl px-6 py-12">
-
-        {/* Intro */}
-        <p className="text-[16px] text-[#000911] mb-6">
-          In this tutorial, we'll build a chatbot where the model decides when to search. No complex orchestration—just a tool definition and a system prompt. The model handles all the logic.
-        </p>
-
-        <ol className="list-decimal list-inside mb-6 text-[#000911] space-y-2">
-          <li>Define a search tool the model can call</li>
-          <li>Use <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">exa.search</code> with <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">text: true</code> to get search results with page contents</li>
-          <li>Let the model decide when to search vs answer from training data</li>
-        </ol>
-
-        <p className="text-[16px] text-[#000911] mb-8">
-          Check out the{" "}
-          <a href="https://github.com/exa-labs/chatbot-demo" target="_blank" rel="noopener noreferrer" className="text-[#0040f0] hover:underline">
-            GitHub repo
-          </a>{" "}
-          for the complete implementation.
-        </p>
-
-        <hr className="my-8 border-[#e5e5e5]" />
 
         {/* Why Exa */}
         <h2 className="text-2xl font-bold text-[#000911] mb-4">Why Exa in a chatbot?</h2>
@@ -348,10 +331,9 @@ const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });`} />
     name: "web_search",
     description: \`Search the web via Exa. Write queries as natural language.
 
-RESULT COUNT - Choose based on query complexity:
-- Simple factual query (price, score, single fact): numResults = 5
-- Normal query (news, what someone said, general info): numResults = 10
-- Complex query needing depth: use multiple searches with numResults = 10 each
+RESULT COUNT:
+- Default: numResults = 5 (use this for most queries)
+- Complex queries needing depth: use multiple focused searches with numResults = 5 each
 
 CATEGORIES - Use sparingly:
 - company: ONLY for "what does X company do" or company research
@@ -368,7 +350,7 @@ For news, sports, general facts, quotes - DO NOT use a category.\`,
             type: "object",
             properties: {
               query: { type: "string" },
-              numResults: { type: "number", default: 10 },
+              numResults: { type: "number", default: 5 },
               category: {
                 type: "string",
                 enum: ["company", "people", "research_paper"],
