@@ -8,9 +8,8 @@ export function PageHeader({ title, subtitle, rightContent }) {
         <div className="flex items-start justify-between">
           {/* Left side - Logo and Title */}
           <div>
-            <Link to="/" className="mb-4 flex items-center gap-2">
-              <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-7 w-7" />
-              <span className="text-[18px] font-medium text-[#000911]">exa</span>
+            <Link to="/" className="mb-4">
+              <img src={getAssetPath("/exa_logo.png")} alt="Exa" className="h-5 w-auto" />
             </Link>
             <h1 className="font-[family-name:var(--font-family-arizona)] text-3xl md:text-4xl tracking-tight text-[#000911] mb-2">
               {title}
