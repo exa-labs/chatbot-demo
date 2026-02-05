@@ -229,17 +229,8 @@ function App() {
               />
             </Link>
 
-            {/* Right side - Exa Toggle and How It Works button */}
+            {/* Right side - How It Works button */}
             <div className="flex items-center gap-2">
-              <ToggleElevated
-                options={["Exa ON", "Exa OFF"]}
-                tooltips={{
-                  "Exa ON": "Search the web for real-time information",
-                  "Exa OFF": "Answer from model knowledge only",
-                }}
-                value={exaEnabled ? "Exa ON" : "Exa OFF"}
-                onChange={(val) => setExaEnabled(val === "Exa ON")}
-              />
               <Link to="/tutorial">
                 <Button
                   variant="default"
@@ -293,7 +284,7 @@ function App() {
         <footer className="relative z-[1] sticky bottom-0 border-t border-[#e5e5e5] bg-white/80 backdrop-blur-sm">
           <div className="mx-auto max-w-4xl px-6 py-4">
             <ChatInputBlue
-              placeholder="Explore anywhere..."
+              placeholder="Ask about anything on the web..."
               tags={followups.length > 0 ? followups : DEFAULT_SUGGESTIONS}
               onSubmit={handleSubmit}
               disabled={isLoading}
@@ -346,7 +337,7 @@ function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
 
       <div className="w-full max-w-4xl px-6">
         <ChatInputBlue
-          placeholder={exaEnabled ? "Explore anywhere..." : "Model only"}
+          placeholder="Ask about anything on the web..."
           tags={suggestions}
           onSubmit={onSubmit}
           disabled={disabled}
