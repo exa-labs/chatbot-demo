@@ -1,9 +1,10 @@
 import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, Plus, ArrowRight } from "lucide-react";
 import { ToggleElevated, CardGalleryItem } from "./components";
 import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
 import { ASCIIBackground } from "./components/ASCIIBackground";
+import Button from "./components/Button";
 import Lottie from "lottie-react";
 import { getAssetPath, getApiPath } from "./lib/basePath";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
@@ -217,43 +218,65 @@ function App() {
       )}
 
       {/* Top Header - Exa Chatbot Demo */}
-      <header className="relative z-20 border-b border-[#e5e5e5] bg-white py-6 md:py-8 shadow-[0_2px_8px_rgba(0,0,0,0.06)]">
-        <div className="flex items-start justify-between px-6 md:px-12 lg:px-20">
-          {/* Left side - Logo and Title */}
-          <div>
-            <div className="flex items-center gap-2 mb-4">
-              <img src={getAssetPath("/exa-logomark-blue.svg")} alt="Exa" className="h-7 w-7" />
-              <span className="text-[18px] font-medium text-[#000911]">exa</span>
+      <header className="relative z-20 bg-white pt-8 pb-12">
+        <div className="mx-auto max-w-7xl px-6 lg:px-8">
+          <div className="flex items-center justify-between mb-4">
+            <Link to="/">
+              <img
+                src={getAssetPath("/exa_logo.png")}
+                alt="Exa"
+                className="h-5 w-auto"
+              />
+            </Link>
+
+            {/* Right side - Exa Toggle and How It Works button */}
+            <div className="flex items-center gap-2">
+              <ToggleElevated
+                options={["Exa ON", "Exa OFF"]}
+                tooltips={{
+                  "Exa ON": "Search the web for real-time information",
+                  "Exa OFF": "Answer from model knowledge only",
+                }}
+                value={exaEnabled ? "Exa ON" : "Exa OFF"}
+                onChange={(val) => setExaEnabled(val === "Exa ON")}
+              />
+              <Link to="/tutorial">
+                <Button
+                  variant="default"
+                  size="sm"
+                  icon={ArrowRight}
+                  iconPosition="end"
+                  className="w-[140px] justify-between"
+                >
+                  How It Works
+                </Button>
+              </Link>
             </div>
-            <h1 className="font-[family-name:var(--font-family-arizona)] text-3xl md:text-4xl tracking-tight text-[#000911] mb-2">
+          </div>
+
+          <div>
+            <h1 className="font-[family-name:var(--font-family-arizona)] text-4xl tracking-tight text-black sm:text-5xl">
               Exa Chatbot Demo
             </h1>
-            <p className="text-[#60646c] text-[16px] md:text-[17px]">
+            <p className="mt-4 text-lg text-black/60">
               AI chatbot with real-time web search powered by Exa
             </p>
           </div>
-
-          {/* Right side - Exa Toggle and How It Works button */}
-          <div className="flex items-center gap-4 pr-4 md:pr-8 lg:pr-12">
-            <ToggleElevated
-              options={["Exa ON", "Exa OFF"]}
-              tooltips={{
-                "Exa ON": "Search the web for real-time information",
-                "Exa OFF": "Answer from model knowledge only",
-              }}
-              value={exaEnabled ? "Exa ON" : "Exa OFF"}
-              onChange={(val) => setExaEnabled(val === "Exa ON")}
-            />
-            <Link
-              to="/tutorial"
-              className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-white px-5 py-2.5 text-[14px] font-medium text-[#000911] hover:border-[#0040f0] hover:text-[#0040f0] transition-colors shadow-sm"
-            >
-              <span>How It Works</span>
-              <span>→</span>
-            </Link>
-          </div>
         </div>
       </header>
+
+      {/* Chat Header - New Chat Button */}
+      <div className="relative z-10 bg-white/80 backdrop-blur-sm">
+        <div className="flex items-center px-4 py-3">
+          <button
+            onClick={createNewChat}
+            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[#f4f4f5]"
+            title="New chat"
+          >
+            <Plus size={20} className="text-[#60646c]" />
+          </button>
+        </div>
+      </div>
 
 
       {/* Chat Area */}
