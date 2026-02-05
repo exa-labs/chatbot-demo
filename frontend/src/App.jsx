@@ -305,10 +305,49 @@ function App() {
   );
 }
 
+// Multi-hop search nudges for empty state
+const SEARCH_NUDGES = [
+  {
+    title: "Multi-source Analysis",
+    prompt: "Compare the latest climate policies from the US, EU, and China",
+    icon: "🌍"
+  },
+  {
+    title: "Emerging Trends",
+    prompt: "What are the most promising AI safety breakthroughs from 2025?",
+    icon: "🔬"
+  },
+  {
+    title: "Market Intelligence",
+    prompt: "Which YC-backed startups in autonomous vehicles raised funding this month?",
+    icon: "🚀"
+  }
+];
+
 // Empty state component with centered input
 function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
   return (
     <div className="flex min-h-[50vh] flex-col items-center justify-center text-center -mt-8">
+      {/* Search Nudges */}
+      {exaEnabled && (
+        <div className="mb-12 grid grid-cols-1 md:grid-cols-3 gap-4 w-full max-w-4xl px-6">
+          {SEARCH_NUDGES.map((nudge, i) => (
+            <button
+              key={i}
+              onClick={() => onSubmit(nudge.prompt)}
+              disabled={disabled}
+              className="group relative rounded-xl border border-[#e5e5e5] bg-white p-6 text-left transition-all hover:border-[#0040f0] hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div className="mb-3 text-3xl">{nudge.icon}</div>
+              <div className="mb-2 text-sm font-medium text-[#60646c]">{nudge.title}</div>
+              <div className="text-sm text-[#000911] group-hover:text-[#0040f0] transition-colors">
+                {nudge.prompt}
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+
       <div className="w-full max-w-xl">
         <ChatInputBlue
           placeholder={exaEnabled ? "Explore anywhere..." : "Model only"}
