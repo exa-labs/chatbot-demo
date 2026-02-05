@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, Plus, ArrowRight } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight } from "lucide-react";
 import { ToggleElevated, CardGalleryItem } from "./components";
 import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
 import { ASCIIBackground } from "./components/ASCIIBackground";
@@ -264,20 +264,6 @@ function App() {
           </div>
         </div>
       </header>
-
-      {/* Chat Header - New Chat Button */}
-      <div className="relative z-10 bg-white/80 backdrop-blur-sm">
-        <div className="flex items-center px-4 py-3">
-          <button
-            onClick={createNewChat}
-            className="flex h-9 w-9 items-center justify-center rounded-lg transition-colors hover:bg-[#f4f4f5]"
-            title="New chat"
-          >
-            <Plus size={20} className="text-[#60646c]" />
-          </button>
-        </div>
-      </div>
-
 
       {/* Chat Area */}
       <main className="relative z-[1] flex-1 overflow-y-auto">
