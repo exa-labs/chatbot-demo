@@ -261,22 +261,41 @@ function Step({ number, title, children }) {
 }
 
 export default function Tutorial() {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopyForLLM = async () => {
+    await navigator.clipboard.writeText(PAGE_CONTENT_FOR_LLM);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  };
+
   return (
     <div className="min-h-screen bg-white">
       <PageHeader
         title="Chatbot with Web Search"
         subtitle="Build an AI chatbot that intelligently calls Exa to search the web for real-time information"
         rightContent={
-          <Link to="/">
+          <>
             <Button
-              variant="default"
+              variant="secondary"
               size="sm"
-              icon={ArrowLeft}
+              icon={copied ? Check : Copy}
               iconPosition="start"
+              onClick={handleCopyForLLM}
             >
-              Back to Chat
+              {copied ? "Copied!" : "Copy for LLM"}
             </Button>
-          </Link>
+            <Link to="/">
+              <Button
+                variant="default"
+                size="sm"
+                icon={ArrowLeft}
+                iconPosition="start"
+              >
+                Back to Chat
+              </Button>
+            </Link>
+          </>
         }
       />
 
