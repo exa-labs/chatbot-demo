@@ -309,18 +309,15 @@ function App() {
 const SEARCH_NUDGES = [
   {
     title: "Multi-source Analysis",
-    prompt: "Compare the latest climate policies from the US, EU, and China",
-    icon: "🌍"
+    prompt: "Compare the latest climate policies from the US, EU, and China"
   },
   {
     title: "Emerging Trends",
-    prompt: "What are the most promising AI safety breakthroughs from 2025?",
-    icon: "🔬"
+    prompt: "What are the most promising AI safety breakthroughs from 2025?"
   },
   {
     title: "Market Intelligence",
-    prompt: "Which YC-backed startups in autonomous vehicles raised funding this month?",
-    icon: "🚀"
+    prompt: "Which YC-backed startups in autonomous vehicles raised funding this month?"
   }
 ];
 
@@ -338,7 +335,6 @@ function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
               disabled={disabled}
               className="group relative rounded-xl border border-[#e5e5e5] bg-white p-6 text-left transition-all hover:border-[#0040f0] hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
             >
-              <div className="mb-3 text-3xl">{nudge.icon}</div>
               <div className="mb-2 text-sm font-medium text-[#60646c]">{nudge.title}</div>
               <div className="text-sm text-[#000911] group-hover:text-[#0040f0] transition-colors">
                 {nudge.prompt}
