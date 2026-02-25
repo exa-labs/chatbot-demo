@@ -99,21 +99,34 @@ Thin wrapper around Exa's `searchAndContents` API:
 - `searchExa(query, category?, maxAgeOverride?, numResults?)` - Single search
 - `searchMultiple(searches)` - Sequential searches with rate limiting
 
-Rate limited to 4 req/s to stay under Exa's limits. Applies freshness filters (2 weeks default, 6 months for research papers).
+Uses **highlights** mode (`highlights: { maxCharacters: 4000 }`) instead of full text. Highlights are joined and capped at 4000 characters per result. Rate limited to 4 req/s to stay under Exa's limits. Applies freshness filters (2 weeks default, 6 months for research papers).
 
 ### prompt.js
 
 Single function `getSystemPrompt(exaEnabled)` that returns the complete system prompt.
 
 Key sections:
-- **WHEN TO SEARCH** - Current events, news, prices, quotes, product info
-- **WHEN NOT TO SEARCH** - General knowledge, coding, historical facts
-- **PARTIAL SEARCH** - Mix knowledge + search for hybrid queries
-- **WRITING QUERIES** - Natural language, correct year, minimal categories
+- **CRITICAL - TRAINING DATA IS STALE** - Forces the model to search for any event that may have occurred after its training cutoff. Without this, models confidently answer recent-event questions from stale training data (e.g. "Super Bowl 2026 hasn't happened yet"). References `${currentDate}` so the model can compare against its cutoff.
+- **WHEN TO SEARCH** - Current events, news, prices, quotes, product info, sports, elections, awards
+- **WHEN NOT TO SEARCH** - General knowledge, coding, historical facts well before cutoff
+- **PARTIAL SEARCH** - Mix knowledge + search for hybrid queries. Examples use `${new Date().getFullYear()}` so they stay current.
+- **WRITING QUERIES** - Natural language, correct year via `${currentDate}`, minimal categories. Encourages year/month in time-sensitive queries but warns against forcing full date into every query.
 - **RESPONSE STYLE** - Match user's request scope
 - **CHARTS** - Render data as bar/line/pie charts
 
 The prompt also handles the "Exa disabled" case, instructing the model to caveat time-sensitive answers.
+
+### Date injection points
+
+The current date (`${currentDate}`) is injected in multiple places to anchor the model's sense of time:
+
+1. **System prompt header** - `TODAY'S DATE: ${currentDate}`
+2. **CRITICAL section** - References cutoff vs today's date to force search decisions
+3. **WRITING QUERIES section** - Header and examples use dynamic year so they stay accurate
+4. **PARTIAL SEARCH examples** - Dynamic year references
+5. **Tool description** (`getSearchTool()`) - `"Today is ${today}"` in the tool description. This is what the model sees at tool-call decision time.
+
+`searchTool` was converted from a static `const` to `getSearchTool()` function so the date is fresh on every request (important for Vercel warm lambdas that persist between invocations).
 
 ### frontend/src/App.jsx
 
@@ -170,7 +183,7 @@ Rendered as interactive Chart.js visualizations.
 The tool system is designed to support multiple search backends:
 
 ```javascript
-// In server.js, add alongside searchTool:
+// In server.js, add alongside getSearchTool():
 const internalSearchTool = {
   type: "function",
   function: {
@@ -181,7 +194,7 @@ const internalSearchTool = {
 };
 
 // Pass both tools:
-tools: [searchTool, internalSearchTool]
+tools: [getSearchTool(), internalSearchTool]
 ```
 
 Then handle the `internal_search` tool call alongside `web_search`.

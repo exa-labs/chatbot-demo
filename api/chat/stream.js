@@ -26,7 +26,9 @@ function getStartDate(maxAgeHours) {
 async function searchExa(query, category, maxAgeOverride, numResults = 5) {
   const searchParams = {
     numResults: Math.min(50, Math.max(3, numResults)),
-    text: true,
+    highlights: {
+      maxCharacters: 4000,
+    },
     type: "auto",
   };
 
@@ -49,7 +51,7 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5) {
   return response.results.map((r) => ({
     title: r.title,
     url: r.url,
-    text: r.text?.slice(0, 1500),
+    text: (r.highlights || []).join("\n").slice(0, 4000),
     publishedDate: r.publishedDate,
     author: r.author,
   }));
@@ -99,9 +101,21 @@ FOLLOW-UP SUGGESTIONS - Always include at the very end of your response:
   return `You are a helpful assistant with access to web search via Exa.
 
 TODAY'S DATE: ${currentDate}
-Use this when writing queries about "upcoming", "recent", "current", or time-relative events.
+
+CRITICAL - TRAINING DATA IS STALE:
+Your training data has a knowledge cutoff. You do NOT know what happened after that cutoff.
+If the user asks about ANY event, result, outcome, or fact that could have occurred between your training cutoff and today (${currentDate}), you MUST search. Do NOT answer from training data alone.
+Examples of things you MUST search for:
+- Sports results (Super Bowl, World Series, championships, games)
+- Election results, political developments
+- Deaths, births, major announcements
+- Award winners (Oscars, Grammys, Nobel prizes)
+- Product launches, company news
+- Any event the user references with a year close to today's date
+If you think an event "hasn't happened yet" based on your training, CHECK TODAY'S DATE \u2014 it may have already occurred. ALWAYS search instead of assuming.
 
 WHEN TO SEARCH:
+- ANYTHING where your answer might be outdated or wrong due to your training cutoff
 - Current events, recent news, specific facts/stats
 - "latest/newest/current" anything
 - Company/product info, prices, people's current roles
@@ -111,28 +125,33 @@ WHEN TO SEARCH:
 - Pricing, plans, or offerings from any company/service
 - Quotes from specific people (search to find their actual words)
 - Comparisons between AI models, tech products, or services (capabilities evolve rapidly)
+- Sports outcomes, scores, winners, standings, draft results
+- Election or vote results
+- Award ceremonies and winners
 
 WHEN NOT TO SEARCH:
 - General knowledge, coding help, creative writing
-- Opinions, hypotheticals, well-established historical facts
-- Static lists (all US presidents, all countries, historical events)
+- Opinions, hypotheticals
+- Historical facts that are WELL before your training cutoff (e.g., "who won WWII" or "who was the first US president")
+- Static lists (all US presidents, all countries)
 - Definitions of general concepts (NOT product-specific features)
 - Generic comparisons of abstract concepts (but DO search for specific product/model comparisons)
 
 PARTIAL SEARCH - CRITICAL:
 When a query mixes static knowledge with time-sensitive information, ONLY search for the time-sensitive parts:
-- "List all US presidents and their current rankings" -> Answer the president list from knowledge, ONLY search for rankings
-- "What are React hooks and what's new in 2026?" -> Explain hooks from knowledge, ONLY search for 2026 updates
-- "Name every NBA team and their current standings" -> List teams from knowledge, ONLY search for standings
-Your training data contains comprehensive knowledge of history, science, geography, etc. Use it. Only search when you genuinely need current/recent information.
+- "List all US presidents and their current rankings" -> Answer the president list from knowledge, ONLY search for "${new Date().getFullYear()} US president rankings"
+- "What are React hooks and what's new in ${new Date().getFullYear()}?" -> Explain hooks from knowledge, ONLY search for "${new Date().getFullYear()} React updates"
+- "Name every NBA team and their current standings" -> List teams from knowledge, ONLY search for "NBA standings ${currentDate}"
+Your training data contains knowledge of history, science, geography, etc. Use it. Only search when you genuinely need current/recent information.
 
-WRITING QUERIES:
+WRITING QUERIES (today is ${currentDate}):
 Exa is semantic/neural, not keyword-based. Write natural language queries.
-Always use the correct year based on today's date:
-- "2024 NFL draft picks" (when asking about upcoming 2026 draft) - WRONG
-- "2026 NFL draft projections and mock drafts" - CORRECT
+Always use the correct year based on today's date (${currentDate}):
+- "2024 NFL draft picks" (wrong year \u2014 check today's date!) - WRONG
+- "${new Date().getFullYear()} NFL draft projections and mock drafts" - CORRECT
 - "TSLA stock price" (keyword style) - WRONG
-- "Tesla current stock performance and price" - CORRECT
+- "Tesla current stock price ${new Date().getFullYear()}" - CORRECT
+For time-sensitive queries, include the year or month when it helps — but don't force the full date into every query.
 
 FOLLOW-UP QUERIES - USE CONVERSATION CONTEXT:
 Before writing any search query, scan the recent conversation for the specific topic.
@@ -217,11 +236,15 @@ CHART BEST PRACTICES:
 `;
 };
 
-const searchTool = {
-  type: "function",
-  function: {
-    name: "web_search",
-    description: `Search the web via Exa. Write queries as natural language (not keywords).
+const getSearchTool = () => {
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+  return {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: `Search the web via Exa. Today is ${today}. Write queries as natural language (not keywords).
 
 RESULT COUNT - Choose based on query complexity:
 - Simple factual query (price, score, single fact): numResults = 5
@@ -234,31 +257,32 @@ CATEGORIES - Use sparingly:
 - research_paper: ONLY for academic papers or arxiv
 
 For news, sports, general facts, current events, quotes, interviews, podcasts - DO NOT use a category.`,
-    parameters: {
-      type: "object",
-      properties: {
-        searches: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Natural language query. Use correct year for time-relative questions." },
-              numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
-              category: {
-                type: "string",
-                enum: ["company", "people", "research_paper"],
-                description: "ONLY use for company info, person bios, or academic papers. Omit for everything else."
-              }
+      parameters: {
+        type: "object",
+        properties: {
+          searches: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Natural language query." },
+                numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
+                category: {
+                  type: "string",
+                  enum: ["company", "people", "research_paper"],
+                  description: "ONLY use for company info, person bios, or academic papers. Omit for everything else."
+                }
+              },
+              required: ["query"]
             },
-            required: ["query"]
+            description: "1-3 searches to run in parallel. Use multiple searches with 10 results each for complex queries needing comprehensive coverage.",
+            maxItems: 3,
           },
-          description: "1-3 searches to run in parallel. Use multiple searches with 10 results each for complex queries needing comprehensive coverage.",
-          maxItems: 3,
         },
+        required: ["searches"],
       },
-      required: ["searches"],
     },
-  },
+  };
 };
 
 export default async function handler(req, res) {
@@ -292,7 +316,7 @@ export default async function handler(req, res) {
     const stream = await client.chat.completions.create({
       model,
       messages,
-      tools: exaEnabled ? [searchTool] : undefined,
+      tools: exaEnabled ? [getSearchTool()] : undefined,
       stream: true,
     });
 

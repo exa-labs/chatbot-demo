@@ -17,11 +17,15 @@ const client = new OpenAI({
 // Default model
 const DEFAULT_MODEL = "google/gemini-2.5-flash";
 
-const searchTool = {
-  type: "function",
-  function: {
-    name: "web_search",
-    description: `Search the web via Exa. Write queries as natural language (not keywords).
+const getSearchTool = () => {
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+  return {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: `Search the web via Exa. Today is ${today}. Write queries as natural language (not keywords).
 
 RESULT COUNT:
 - Default: numResults = 5 (use this for most queries)
@@ -33,31 +37,32 @@ CATEGORIES - Use sparingly:
 - research_paper: ONLY for academic papers or arxiv
 
 For news, sports, general facts, current events, quotes, interviews, podcasts - DO NOT use a category.`,
-    parameters: {
-      type: "object",
-      properties: {
-        searches: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Natural language query. Use correct year for time-relative questions." },
-              numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
-              category: {
-                type: "string",
-                enum: ["company", "people", "research_paper"],
-                description: "ONLY use for company info, person bios, or academic papers. Omit for everything else."
-              }
+      parameters: {
+        type: "object",
+        properties: {
+          searches: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Natural language query." },
+                numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
+                category: {
+                  type: "string",
+                  enum: ["company", "people", "research_paper"],
+                  description: "ONLY use for company info, person bios, or academic papers. Omit for everything else."
+                }
+              },
+              required: ["query"]
             },
-            required: ["query"]
+            description: "1-3 searches to run in parallel. Use multiple searches with 5 results each for complex queries needing comprehensive coverage.",
+            maxItems: 3,
           },
-          description: "1-3 searches to run in parallel. Use multiple searches with 5 results each for complex queries needing comprehensive coverage.",
-          maxItems: 3,
         },
+        required: ["searches"],
       },
-      required: ["searches"],
     },
-  },
+  };
 };
 
 // Streaming endpoint
@@ -90,7 +95,7 @@ app.post("/api/chat/stream", async (req, res) => {
     const stream = await client.chat.completions.create({
       model,
       messages,
-      tools: exaEnabled ? [searchTool] : undefined,
+      tools: exaEnabled ? [getSearchTool()] : undefined,
       stream: true,
     });
 
@@ -263,7 +268,7 @@ app.post("/api/chat", async (req, res) => {
     const response = await client.chat.completions.create({
       model,
       messages,
-      tools: exaEnabled ? [searchTool] : undefined,
+      tools: exaEnabled ? [getSearchTool()] : undefined,
     });
 
     const choice = response.choices[0];

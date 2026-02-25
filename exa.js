@@ -26,7 +26,9 @@ function getStartDate(maxAgeHours) {
 export async function searchExa(query, category, maxAgeOverride, numResults = 5) {
   const searchParams = {
     numResults: Math.min(50, Math.max(3, numResults)),
-    text: true,
+    highlights: {
+      maxCharacters: 4000,
+    },
     type: "auto",
   };
 
@@ -50,7 +52,7 @@ export async function searchExa(query, category, maxAgeOverride, numResults = 5)
   return response.results.map((r) => ({
     title: r.title,
     url: r.url,
-    text: r.text?.slice(0, 1500),
+    text: (r.highlights || []).join("\n").slice(0, 4000),
     publishedDate: r.publishedDate,
     author: r.author,
   }));
