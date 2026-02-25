@@ -99,7 +99,7 @@ Thin wrapper around Exa's `searchAndContents` API:
 - `searchExa(query, category?, maxAgeOverride?, numResults?)` - Single search
 - `searchMultiple(searches)` - Sequential searches with rate limiting
 
-Uses **highlights** mode (`highlights: { numSentences: 3, highlightsPerUrl: 5 }`) instead of full text. Highlights are joined and capped at 4000 characters per result. Rate limited to 4 req/s to stay under Exa's limits. Applies freshness filters (2 weeks default, 6 months for research papers).
+Uses **highlights** mode (`highlights: { maxCharacters: 4000 }`) instead of full text. Highlights are joined and capped at 4000 characters per result. Rate limited to 4 req/s to stay under Exa's limits. Applies freshness filters (2 weeks default, 6 months for research papers).
 
 ### prompt.js
 

@@ -27,8 +27,7 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5) {
   const searchParams = {
     numResults: Math.min(50, Math.max(3, numResults)),
     highlights: {
-      numSentences: 3,
-      highlightsPerUrl: 5,
+      maxCharacters: 4000,
     },
     type: "auto",
   };
