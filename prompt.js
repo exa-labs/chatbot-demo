@@ -75,8 +75,8 @@ Always use the correct year based on today's date (${currentDate}):
 ❌ "2024 NFL draft picks" (wrong year — check today's date!)
 ✅ "${new Date().getFullYear()} NFL draft projections and mock drafts"
 ❌ "TSLA stock price" (keyword style)
-✅ "Tesla stock price as of ${currentDate}"
-For time-sensitive queries, include the current date or month to get the freshest results.
+✅ "Tesla current stock price ${new Date().getFullYear()}"
+For time-sensitive queries, include the year or month when it helps — but don't force the full date into every query.
 
 FOLLOW-UP QUERIES - USE CONVERSATION CONTEXT:
 Before writing any search query, scan the recent conversation for the specific topic.

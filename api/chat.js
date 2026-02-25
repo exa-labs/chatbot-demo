@@ -129,7 +129,7 @@ WHEN NOT TO SEARCH:
 
 WRITING QUERIES (today is ${currentDate}):
 Exa is semantic/neural, not keyword-based. Write natural language queries.
-Always use the correct year based on today's date (${currentDate}). For time-sensitive queries, include the current date or month to get the freshest results.
+Always use the correct year based on today's date (${currentDate}). For time-sensitive queries, include the year or month when it helps — but don't force the full date into every query.
 
 CATEGORIES - Use sparingly:
 - company: ONLY for "what does X company do" or company research
