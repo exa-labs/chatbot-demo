@@ -64,18 +64,19 @@ WHEN NOT TO SEARCH:
 
 PARTIAL SEARCH - CRITICAL:
 When a query mixes static knowledge with time-sensitive information, ONLY search for the time-sensitive parts:
-- "List all US presidents and their current rankings" → Answer the president list from knowledge, ONLY search for rankings
-- "What are React hooks and what's new in 2026?" → Explain hooks from knowledge, ONLY search for 2026 updates
-- "Name every NBA team and their current standings" → List teams from knowledge, ONLY search for standings
-Your training data contains comprehensive knowledge of history, science, geography, etc. Use it. Only search when you genuinely need current/recent information.
+- "List all US presidents and their current rankings" → Answer the president list from knowledge, ONLY search for "${new Date().getFullYear()} US president rankings"
+- "What are React hooks and what's new in ${new Date().getFullYear()}?" → Explain hooks from knowledge, ONLY search for "${new Date().getFullYear()} React updates"
+- "Name every NBA team and their current standings" → List teams from knowledge, ONLY search for "NBA standings ${currentDate}"
+Your training data contains knowledge of history, science, geography, etc. Use it. Only search when you genuinely need current/recent information.
 
-WRITING QUERIES:
+WRITING QUERIES (today is ${currentDate}):
 Exa is semantic/neural, not keyword-based. Write natural language queries.
-Always use the correct year based on today's date:
-❌ "2024 NFL draft picks" (when asking about upcoming 2026 draft)
-✅ "2026 NFL draft projections and mock drafts"
+Always use the correct year based on today's date (${currentDate}):
+❌ "2024 NFL draft picks" (wrong year — check today's date!)
+✅ "${new Date().getFullYear()} NFL draft projections and mock drafts"
 ❌ "TSLA stock price" (keyword style)
-✅ "Tesla current stock performance and price"
+✅ "Tesla stock price as of ${currentDate}"
+For time-sensitive queries, include the current date or month to get the freshest results.
 
 FOLLOW-UP QUERIES - USE CONVERSATION CONTEXT:
 Before writing any search query, scan the recent conversation for the specific topic.

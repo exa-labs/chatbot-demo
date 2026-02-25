@@ -127,8 +127,9 @@ WHEN NOT TO SEARCH:
 - Opinions, hypotheticals
 - Historical facts that are WELL before your training cutoff (e.g., "who won WWII" or "who was the first US president")
 
-WRITING QUERIES:
+WRITING QUERIES (today is ${currentDate}):
 Exa is semantic/neural, not keyword-based. Write natural language queries.
+Always use the correct year based on today's date (${currentDate}). For time-sensitive queries, include the current date or month to get the freshest results.
 
 CATEGORIES - Use sparingly:
 - company: ONLY for "what does X company do" or company research
@@ -146,11 +147,15 @@ When you receive search results, you MUST use them to answer:
 `;
 };
 
-const searchTool = {
-  type: "function",
-  function: {
-    name: "web_search",
-    description: `Search the web via Exa. Write queries as natural language (not keywords).
+const getSearchTool = () => {
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+  return {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: `Search the web via Exa. Today is ${today}. Write queries as natural language (not keywords). Include the current date/year in time-sensitive queries for best results.
 
 RESULT COUNT - Choose based on query complexity:
 - Simple factual query (price, score, single fact): numResults = 5
@@ -163,31 +168,32 @@ CATEGORIES - Use sparingly:
 - research_paper: ONLY for academic papers or arxiv
 
 For news, sports, general facts, current events, quotes, interviews, podcasts - DO NOT use a category.`,
-    parameters: {
-      type: "object",
-      properties: {
-        searches: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Natural language query. Use correct year for time-relative questions." },
-              numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
-              category: {
-                type: "string",
-                enum: ["company", "people", "research_paper"],
-                description: "ONLY use for company info, person bios, or academic papers. Omit for everything else."
-              }
+      parameters: {
+        type: "object",
+        properties: {
+          searches: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: `Natural language query. Today is ${today} \u2014 use the correct year/date for time-relative questions.` },
+                numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
+                category: {
+                  type: "string",
+                  enum: ["company", "people", "research_paper"],
+                  description: "ONLY use for company info, person bios, or academic papers. Omit for everything else."
+                }
+              },
+              required: ["query"]
             },
-            required: ["query"]
+            description: "1-3 searches to run in parallel. Use multiple searches with 10 results each for complex queries needing comprehensive coverage.",
+            maxItems: 3,
           },
-          description: "1-3 searches to run in parallel. Use multiple searches with 10 results each for complex queries needing comprehensive coverage.",
-          maxItems: 3,
         },
+        required: ["searches"],
       },
-      required: ["searches"],
     },
-  },
+  };
 };
 
 export default async function handler(req, res) {
@@ -212,7 +218,7 @@ export default async function handler(req, res) {
     const response = await client.chat.completions.create({
       model,
       messages,
-      tools: exaEnabled ? [searchTool] : undefined,
+      tools: exaEnabled ? [getSearchTool()] : undefined,
     });
 
     const choice = response.choices[0];
