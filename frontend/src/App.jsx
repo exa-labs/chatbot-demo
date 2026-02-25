@@ -456,7 +456,7 @@ function LoadingRings({ searching = false, queries = [] }) {
 }
 
 // Search Query Row component - shows Exa queries with expandable sources
-function SearchQueryRow({ query, category, sources = [], timeMs }) {
+function SearchQueryRow({ query, category, sources = [] }) {
   const [expanded, setExpanded] = useState(false);
 
   return (
@@ -475,7 +475,6 @@ function SearchQueryRow({ query, category, sources = [], timeMs }) {
         {sources.length > 0 && (
           <span className="text-[11px] text-[#60646c]">
             {sources.length} {sources.length === 1 ? 'source' : 'sources'}
-            {timeMs && ` · ${timeMs}ms`}
           </span>
         )}
         {sources.length > 0 && (
@@ -603,7 +602,6 @@ function Message({ message }) {
                     query={search.query}
                     category={search.category}
                     sources={search.sources || []}
-                    timeMs={search.timeMs}
                   />
                 ))}
               </div>
