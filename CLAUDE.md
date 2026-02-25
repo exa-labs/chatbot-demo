@@ -124,7 +124,7 @@ The current date (`${currentDate}`) is injected in multiple places to anchor the
 2. **CRITICAL section** - References cutoff vs today's date to force search decisions
 3. **WRITING QUERIES section** - Header and examples use dynamic year so they stay accurate
 4. **PARTIAL SEARCH examples** - Dynamic year references
-5. **Tool description** (`getSearchTool()`) - `"Today is ${today}"` in the tool description and query parameter description. This is what the model sees at tool-call decision time.
+5. **Tool description** (`getSearchTool()`) - `"Today is ${today}"` in the tool description. This is what the model sees at tool-call decision time.
 
 `searchTool` was converted from a static `const` to `getSearchTool()` function so the date is fresh on every request (important for Vercel warm lambdas that persist between invocations).
 

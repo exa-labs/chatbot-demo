@@ -25,7 +25,7 @@ const getSearchTool = () => {
     type: "function",
     function: {
       name: "web_search",
-      description: `Search the web via Exa. Today is ${today}. Write queries as natural language (not keywords). Include the current date/year in time-sensitive queries for best results.
+      description: `Search the web via Exa. Today is ${today}. Write queries as natural language (not keywords).
 
 RESULT COUNT:
 - Default: numResults = 5 (use this for most queries)
@@ -45,7 +45,7 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
             items: {
               type: "object",
               properties: {
-                query: { type: "string", description: `Natural language query. Today is ${today} — use the correct year/date for time-relative questions.` },
+                query: { type: "string", description: "Natural language query." },
                 numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
                 category: {
                   type: "string",
