@@ -162,6 +162,14 @@ async function chat(userMessage) {
 
 Note: The model can request 1-5 parallel searches for complex queries. Streaming is supported for both the initial response and the final answer.
 
+## Showing Citations
+
+Exa returns source metadata alongside every search result. You can use this to show users exactly where information came from.
+
+Each result from exa.search includes title, url, publishedDate, and author. In this demo, we pass that metadata to the frontend separately from the LLM response. After the model finishes answering, we render the sources as expandable cards grouped by search query.
+
+Instead of showing all sources in a list, you could have the LLM cite inline (e.g. [1], [2]) by instructing it to reference specific URLs from the Exa results. You could also have the model report how many sources it actually used in its answer.
+
 ## Conclusion
 
 That's it! The model now decides when to search, executes Exa queries for real-time information, and synthesizes answers with citations.
@@ -571,6 +579,47 @@ FOLLOW-UP SUGGESTIONS - Always include at the very end of your response:
             <Note>The model can request 1-5 parallel searches for complex queries. Streaming is supported for both the initial response and the final answer.</Note>
           </Step>
         </div>
+
+        <hr className="my-8 border-[#e5e5e5]" />
+
+        {/* Showing Citations */}
+        <h2 className="text-2xl font-bold text-[#000911] mb-4">Showing Citations</h2>
+        <p className="text-[16px] text-[#000911] mb-4">
+          Exa returns source metadata alongside every search result. You can use this to show users exactly where information came from.
+        </p>
+
+        <h3 className="text-lg font-semibold text-[#000911] mb-3">What Exa returns</h3>
+        <p className="text-[16px] text-[#60646c] mb-4">
+          Each result from <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">exa.search</code> includes <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">title</code>, <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">url</code>, <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">publishedDate</code>, and <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">author</code>. These are your citations.
+        </p>
+
+        <CodeBlock language="javascript" code={`// Each Exa result includes citation metadata
+const sources = response.results.map(r => ({
+  title: r.title,         // "OpenAI announces GPT-5"
+  url: r.url,             // "https://openai.com/blog/gpt-5"
+  publishedDate: r.publishedDate, // "2026-02-15"
+  author: r.author,       // "OpenAI"
+}));`} />
+
+        <h3 className="text-lg font-semibold text-[#000911] mt-6 mb-3">How we display them</h3>
+        <p className="text-[16px] text-[#60646c] mb-4">
+          In this demo, we pass the source metadata to the frontend separately from the LLM response. After the model finishes answering, we render the sources as expandable cards grouped by search query — each showing the title, domain, date, and a link to the original page.
+        </p>
+
+        <CodeBlock language="javascript" code={`// Send citation metadata to the frontend
+const citationData = searchResults.map(({ query, results }) => ({
+  query,
+  sources: results.map(r => ({
+    title: r.title,
+    url: r.url,
+    date: r.publishedDate,
+    author: r.author,
+  })),
+}));`} />
+
+        <Note>
+          Instead of showing all sources in a list, you could have the LLM cite inline (e.g. [1], [2]) by instructing it to reference specific URLs from the Exa results. You could also have the model report how many sources it actually used in its answer, giving users a confidence signal without cluttering the UI.
+        </Note>
 
         <hr className="my-8 border-[#e5e5e5]" />
 
