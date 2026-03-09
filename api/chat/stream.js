@@ -318,6 +318,7 @@ export default async function handler(req, res) {
       messages,
       tools: exaEnabled ? [getSearchTool()] : undefined,
       stream: true,
+      reasoning_format: "hidden",
     });
 
     let toolCalls = [];
@@ -437,6 +438,7 @@ export default async function handler(req, res) {
         ...toolMessages,
       ],
       stream: true,
+      reasoning_format: "hidden",
     });
 
     for await (const chunk of finalStream) {

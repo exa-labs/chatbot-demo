@@ -221,6 +221,7 @@ export default async function handler(req, res) {
       model,
       messages,
       tools: exaEnabled ? [getSearchTool()] : undefined,
+      reasoning_format: "hidden",
     });
 
     const choice = response.choices[0];
@@ -291,6 +292,7 @@ export default async function handler(req, res) {
         choice.message,
         ...toolMessages,
       ],
+      reasoning_format: "hidden",
     });
 
     res.json({

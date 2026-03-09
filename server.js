@@ -97,6 +97,7 @@ app.post("/api/chat/stream", async (req, res) => {
       messages,
       tools: exaEnabled ? [getSearchTool()] : undefined,
       stream: true,
+      reasoning_format: "hidden",
     });
 
     // Accumulate tool calls and content from stream
@@ -230,6 +231,7 @@ app.post("/api/chat/stream", async (req, res) => {
         ...toolMessages,
       ],
       stream: true,
+      reasoning_format: "hidden",
     });
 
     for await (const chunk of finalStream) {
