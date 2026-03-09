@@ -2,13 +2,13 @@ import OpenAI from "openai";
 import Exa from "exa-js";
 
 const client = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPEN_ROUTER_KEY,
+  baseURL: "https://api.cerebras.ai/v1",
+  apiKey: process.env.CEREBRAS_API_KEY || "csk-ctnvpnrpxw5t244c83c84pdecwk9tpfdp3jkvece9kve248x",
 });
 
 const exa = new Exa(process.env.EXA_API_KEY);
 
-const DEFAULT_MODEL = "google/gemini-2.5-flash";
+const DEFAULT_MODEL = "gpt-oss-120b";
 
 const freshnessDefaults = {
   tweet: 48,

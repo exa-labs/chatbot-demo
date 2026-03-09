@@ -10,12 +10,12 @@ app.use(cors());
 app.use(express.json());
 
 const client = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPEN_ROUTER_KEY,
+  baseURL: "https://api.cerebras.ai/v1",
+  apiKey: process.env.CEREBRAS_API_KEY || "csk-ctnvpnrpxw5t244c83c84pdecwk9tpfdp3jkvece9kve248x",
 });
 
 // Default model
-const DEFAULT_MODEL = "google/gemini-2.5-flash";
+const DEFAULT_MODEL = "gpt-oss-120b";
 
 const getSearchTool = () => {
   const today = new Date().toLocaleDateString('en-US', {

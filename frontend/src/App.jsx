@@ -33,7 +33,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [exaEnabled, setExaEnabled] = useState(true);
   const [followups, setFollowups] = useState([]);
-  const [model, setModel] = useState("google/gemini-2.5-flash");
+  const [model, setModel] = useState("gpt-oss-120b");
   const messagesEndRef = useRef(null);
 
   const currentChat = chats.find(c => c.id === currentChatId) || chats[0];
