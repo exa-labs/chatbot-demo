@@ -9,6 +9,7 @@ import Button from "./components/Button";
 import Lottie from "lottie-react";
 import { getApiPath } from "./lib/basePath";
 import exaLogomarkBlue from "./assets/exa-logomark-blue.svg";
+import cerebrasLogo from "./assets/cerebras-logo.svg";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Line, Pie, Doughnut } from 'react-chartjs-2';
 import ReactMarkdown from 'react-markdown';
@@ -262,7 +263,12 @@ function App() {
 
       <PageHeader
         title="Exa Chatbot Demo"
-        subtitle="AI chatbot with real-time web search powered by Exa"
+        subtitle={
+          <span className="flex items-center gap-1.5">
+            Powered by Cerebras inference
+            <img src={cerebrasLogo} alt="Cerebras" className="inline h-4 w-4" />
+          </span>
+        }
         rightContent={
           <Link to="/tutorial">
             <Button
