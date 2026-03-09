@@ -1,7 +1,7 @@
 import { Link } from "react-router-dom";
 import exaLogo from "../assets/exa_logo.png";
 
-export function PageHeader({ title, subtitle, rightContent }) {
+export function PageHeader({ title, subtitle, rightContent, children }) {
   return (
     <header className="relative z-[1] bg-white pt-8 pb-12">
       <div className="mx-auto max-w-7xl px-6 lg:px-8">
@@ -27,9 +27,12 @@ export function PageHeader({ title, subtitle, rightContent }) {
           <h1 className="font-arizona text-4xl tracking-tight text-black sm:text-5xl">
             {title}
           </h1>
-          <p className="mt-4 text-lg text-black/60">
-            {subtitle}
-          </p>
+          {subtitle && (
+            <div className="mt-4 text-lg text-black/60">
+              {subtitle}
+            </div>
+          )}
+          {children}
         </div>
       </div>
     </header>
