@@ -375,24 +375,27 @@ export default async function handler(req, res) {
       { role: "user", content: message },
     ];
 
+    // Strip leaked model artifacts (followups arrays, tool call JSON, "assistant" prefix)
+    function stripLeakedArtifacts(text) {
+      return text
+        .replace(/\n?followups\s*\[.*$/s, "")          // followups [...] at end
+        .replace(/\n?```followups[\s\S]*?```/g, "")    // ```followups ... ```
+        .replace(/\{\s*"name"\s*:\s*"web_search"[\s\S]*$/s, "")  // raw tool call JSON
+        .replace(/^\s*assistant\s*/i, "")              // stray "assistant" prefix
+        .trimEnd();
+    }
+
     // Fast path: direct streaming for non-Exa requests
     if (!exaEnabled) {
       const t0 = Date.now();
       const stream = await client.chat.completions.create({ model, messages, stream: true });
-      let started = false;
-      let initBuf = "";
+      let fullContent = "";
       for await (const chunk of stream) {
         const c = chunk.choices[0]?.delta?.content;
-        if (!c) continue;
-        if (!started) {
-          initBuf += c;
-          const cleaned = initBuf.trimStart().replace(/^\s*assistant\s*/i, "").trimStart();
-          if (cleaned) { sendEvent("content", { content: cleaned }); started = true; }
-          continue;
-        }
-        sendEvent("content", { content: c });
+        if (c) fullContent += c;
       }
-      if (!started && initBuf.trim()) sendEvent("content", { content: initBuf.trim() });
+      const cleaned = stripLeakedArtifacts(fullContent.trimStart());
+      if (cleaned) sendEvent("content", { content: cleaned });
       sendEvent("done", { exaUsed: false, totalMs: Date.now() - t0 });
       return res.end();
     }
@@ -576,39 +579,26 @@ export default async function handler(req, res) {
       stream: true,
     });
 
-    let finalBuffer = "";
-    let streaming = false;
+    // Collect the full final response, then clean and send
+    let fullFinal = "";
     for await (const chunk of finalStream) {
       const content = chunk.choices[0]?.delta?.content;
-      if (!content) continue;
-      if (streaming) {
-        sendEvent("content", { content });
-        continue;
-      }
-      finalBuffer += content;
-      const trimmed = finalBuffer.trimStart();
-      if (trimmed.startsWith("{")) {
-        if (trimmed.includes("}") && trimmed.indexOf("}") < trimmed.length - 1) {
-          const afterJson = trimmed.slice(trimmed.lastIndexOf("}") + 1);
-          const cleaned = afterJson.replace(/^\s*assistant\s*/i, "").trimStart();
-          if (cleaned) {
-            sendEvent("content", { content: cleaned });
-          }
-          streaming = true;
-        }
-        continue;
-      }
-      const cleaned = trimmed.replace(/^\s*assistant\s*/i, "").trimStart();
-      if (cleaned) {
-        sendEvent("content", { content: cleaned });
-      }
-      streaming = true;
+      if (content) fullFinal += content;
     }
-    if (!streaming && finalBuffer) {
-      const trimmed = finalBuffer.trim();
-      if (!trimmed.startsWith("{")) {
-        sendEvent("content", { content: trimmed });
+    // Strip leading JSON blobs (tool call echo), "assistant" prefix, and trailing artifacts
+    let trimmed = fullFinal.trimStart();
+    if (trimmed.startsWith("{")) {
+      // Skip over leading JSON blob
+      const lastBrace = trimmed.lastIndexOf("}");
+      if (lastBrace >= 0 && lastBrace < trimmed.length - 1) {
+        trimmed = trimmed.slice(lastBrace + 1);
+      } else {
+        trimmed = ""; // entire response is JSON — suppress it
       }
+    }
+    const cleanedFinal = stripLeakedArtifacts(trimmed.trimStart());
+    if (cleanedFinal) {
+      sendEvent("content", { content: cleanedFinal });
     }
 
     const finalCallMs = Date.now() - finalCallStart;
