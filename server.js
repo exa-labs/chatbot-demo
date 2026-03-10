@@ -91,14 +91,24 @@ app.post("/api/chat/stream", async (req, res) => {
       { role: "user", content: message },
     ];
 
+    // Send periodic heartbeats to keep the SSE connection alive while
+    // we wait for the non-streaming Cerebras call and Exa search.
+    const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), 5000);
+
     // Use non-streaming for the initial call to reliably detect tool calls.
     // llama3.1-8b sometimes outputs tool calls as content text in streaming
     // mode, which gets sent to the client before we can detect it.
-    const response = await client.chat.completions.create({
-      model,
-      messages,
-      tools: exaEnabled ? [getSearchTool()] : undefined,
-    });
+    let response;
+    try {
+      response = await client.chat.completions.create({
+        model,
+        messages,
+        tools: exaEnabled ? [getSearchTool()] : undefined,
+      });
+    } catch (err) {
+      clearInterval(heartbeat);
+      throw err;
+    }
 
     const choice = response.choices[0];
 
@@ -129,6 +139,7 @@ app.post("/api/chat/stream", async (req, res) => {
     }
 
     if (toolCalls.length === 0) {
+      clearInterval(heartbeat);
       const content = choice.message.content;
       if (content) {
         sendEvent("content", { content });
@@ -173,6 +184,7 @@ app.post("/api/chat/stream", async (req, res) => {
 
     // If no valid searches, return without searching
     if (allSearches.length === 0) {
+      clearInterval(heartbeat);
       console.log("No valid searches extracted from tool calls");
       sendEvent("done", { exaUsed: false });
       return res.end();
@@ -224,6 +236,8 @@ app.post("/api/chat/stream", async (req, res) => {
       tool_call_id: id,
       content: resultsText,
     }));
+
+    clearInterval(heartbeat);
 
     // Stream the final response
     const finalStream = await client.chat.completions.create({
