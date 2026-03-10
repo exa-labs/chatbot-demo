@@ -859,7 +859,8 @@ function MessageContent({ content }) {
           code({ node, inline, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || '');
             const language = match ? match[1] : '';
-            const codeString = String(children).replace(/\n$/, '');
+            const codeString = String(children || '').replace(/\n$/, '');
+            if (!codeString || codeString === 'undefined') return null;
             return inline ? (
               <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]" {...props}>
                 {children}
