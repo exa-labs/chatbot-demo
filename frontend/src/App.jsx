@@ -36,8 +36,8 @@ const SEARCH_NUDGES = [
     prompt: `What are the most promising AI safety breakthroughs from ${new Date().getFullYear()}?`
   },
   {
-    title: "AI & Robotics Fundraises",
-    prompt: "What are the most recent relevant fundraises in AI and robotics?"
+    title: "Super Bowl",
+    prompt: "Who won the Super Bowl and who was the MVP?"
   }
 ];
 
