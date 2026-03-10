@@ -328,8 +328,8 @@ const SEARCH_NUDGES = [
     prompt: `What are the most promising AI safety breakthroughs from ${new Date().getFullYear()}?`
   },
   {
-    title: "Market Intelligence",
-    prompt: "Which YC-backed startups in autonomous vehicles raised funding this month?"
+    title: "AI & Robotics Fundraises",
+    prompt: "What are the most recent relevant fundraises in AI and robotics?"
   }
 ];
 
