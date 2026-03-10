@@ -285,6 +285,35 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
   };
 };
 
+/**
+ * Strips reasoning artifacts from gpt-oss-120b responses.
+ * The model embeds JSON search/cursor objects and internal monologue
+ * in the content field when processing tool results. The actual answer
+ * always follows after the last artifact.
+ */
+function cleanReasoningArtifacts(content) {
+  if (!content) return content;
+
+  // Match JSON objects containing reasoning-specific keys
+  const reasoningPattern = /\{[^{}]*"(?:search_query|search|cursor|topn|source|num_lines|loc|query)"[^{}]*\}/g;
+  let lastEnd = -1;
+  let m;
+  while ((m = reasoningPattern.exec(content)) !== null) {
+    lastEnd = m.index + m[0].length;
+  }
+
+  if (lastEnd >= 0 && lastEnd < content.length) {
+    let answer = content.slice(lastEnd);
+    // Clean remaining text reasoning markers
+    answer = answer.replace(/\[Results\][^\n]*/g, '');
+    answer = answer.replace(/Search results?:\s*\n?/gi, '');
+    answer = answer.trim();
+    if (answer.length > 0) return answer;
+  }
+
+  return content;
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -441,11 +470,20 @@ export default async function handler(req, res) {
       reasoning_format: "hidden",
     });
 
+    // Buffer the full response — gpt-oss-120b mixes reasoning artifacts
+    // (JSON search/cursor objects, internal monologue) with the actual answer.
+    // We need to collect everything, strip the artifacts, then send clean content.
+    let fullContent = "";
     for await (const chunk of finalStream) {
       const content = chunk.choices[0]?.delta?.content;
       if (content) {
-        sendEvent("content", { content });
+        fullContent += content;
       }
+    }
+
+    const cleanedContent = cleanReasoningArtifacts(fullContent);
+    if (cleanedContent) {
+      sendEvent("content", { content: cleanedContent });
     }
 
     sendEvent("done", { exaUsed: true, searchTimeMs, totalSources });
