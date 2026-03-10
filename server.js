@@ -65,7 +65,6 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
   };
 };
 
-
 // Streaming endpoint
 app.post("/api/chat/stream", async (req, res) => {
   // Set up SSE
@@ -92,70 +91,72 @@ app.post("/api/chat/stream", async (req, res) => {
       { role: "user", content: message },
     ];
 
-    // Use non-streaming for the initial call when tools are enabled.
-    // llama3.1-8b on Cerebras outputs tool calls as content text in streaming
-    // mode instead of structured tool_calls deltas.
-    if (exaEnabled) {
-      const response = await client.chat.completions.create({
-        model,
-        messages,
-        tools: [getSearchTool()],
-      });
+    // Stream first call to detect tool calls while streaming
+    const stream = await client.chat.completions.create({
+      model,
+      messages,
+      tools: exaEnabled ? [getSearchTool()] : undefined,
+      stream: true,
+    });
 
-      const choice = response.choices[0];
+    // Accumulate tool calls and content from stream
+    let toolCalls = [];
+    let contentBuffer = "";
+    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
 
-      // llama3.1-8b sometimes outputs tool calls as content text instead of
-      // using the structured tool_calls field. Detect and parse this case.
-      let parsedToolCalls = choice.message.tool_calls;
-      if (!parsedToolCalls && choice.message.content) {
-        const content = choice.message.content.trim();
-        if (content.startsWith("{") && content.includes('"name"') && content.includes('"arguments"')) {
-          try {
-            const parsed = JSON.parse(content);
-            if (parsed.name && parsed.arguments) {
-              parsedToolCalls = [{
-                id: "manual_tool_call_0",
-                type: "function",
-                function: {
-                  name: parsed.name,
-                  arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
-                },
-              }];
-            }
-          } catch (_) {}
-        }
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+
+      // Stream content immediately
+      if (delta?.content) {
+        contentBuffer += delta.content;
+        sendEvent("content", { content: delta.content });
       }
 
-      if (!parsedToolCalls) {
-        const content = choice.message.content;
-        if (content) {
-          sendEvent("content", { content });
-        }
-        sendEvent("done", { exaUsed: false });
-        return res.end();
-      }
-
-      var toolCalls = parsedToolCalls;
-      var assistantMessage = parsedToolCalls === choice.message.tool_calls
-        ? choice.message
-        : { role: "assistant", content: null, tool_calls: parsedToolCalls };
-    } else {
-      const stream = await client.chat.completions.create({
-        model,
-        messages,
-        stream: true,
-      });
-
-      for await (const chunk of stream) {
-        const content = chunk.choices[0]?.delta?.content;
-        if (content) {
-          sendEvent("content", { content });
+      // Accumulate tool calls
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index;
+          if (!toolCalls[idx]) {
+            toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
+          }
+          if (tc.id) toolCalls[idx].id = tc.id;
+          if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
+          if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
         }
       }
+    }
 
+    // llama3.1-8b sometimes outputs tool calls as content text instead of
+    // structured tool_calls deltas. Detect and parse this case.
+    if (toolCalls.length === 0 && contentBuffer) {
+      const trimmed = contentBuffer.trim();
+      if (trimmed.startsWith("{") && trimmed.includes('"name"') && trimmed.includes('"arguments"')) {
+        try {
+          const parsed = JSON.parse(trimmed);
+          if (parsed.name && parsed.arguments) {
+            toolCalls = [{
+              id: "manual_tool_call_0",
+              type: "function",
+              function: {
+                name: parsed.name,
+                arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
+              },
+            }];
+          }
+        } catch (_) {}
+      }
+    }
+
+    // No tool calls - we already streamed the response
+    if (toolCalls.length === 0) {
       sendEvent("done", { exaUsed: false });
       return res.end();
     }
+
+    // Build assistant message for tool call flow
+    assistantMessage.content = contentBuffer || null;
+    assistantMessage.tool_calls = toolCalls;
 
     // Collect searches with defensive parsing for different model formats
     const allSearches = [];
@@ -165,7 +166,6 @@ app.post("/api/chat/stream", async (req, res) => {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
 
-        // llama3.1-8b sometimes returns searches as a stringified JSON array
         if (typeof searches === 'string') {
           try { searches = JSON.parse(searches); } catch (_) {}
         }
@@ -257,7 +257,6 @@ app.post("/api/chat/stream", async (req, res) => {
       stream: true,
     });
 
-    // Stream the final response directly to the client
     for await (const chunk of finalStream) {
       const content = chunk.choices[0]?.delta?.content;
       if (content) {
@@ -299,14 +298,17 @@ app.post("/api/chat", async (req, res) => {
 
     const choice = response.choices[0];
 
-    let parsedToolCalls2 = choice.message.tool_calls;
-    if (!parsedToolCalls2 && choice.message.content) {
-      const content = choice.message.content.trim();
-      if (content.startsWith("{") && content.includes('"name"') && content.includes('"arguments"')) {
+    // llama3.1-8b sometimes outputs tool calls as content text instead of
+    // the structured tool_calls field. Detect and parse this case.
+    let toolCallsList = choice.message.tool_calls;
+    let choiceMessage = choice.message;
+    if (!toolCallsList && choice.message.content) {
+      const trimmed = choice.message.content.trim();
+      if (trimmed.startsWith("{") && trimmed.includes('"name"') && trimmed.includes('"arguments"')) {
         try {
-          const parsed = JSON.parse(content);
+          const parsed = JSON.parse(trimmed);
           if (parsed.name && parsed.arguments) {
-            parsedToolCalls2 = [{
+            toolCallsList = [{
               id: "manual_tool_call_0",
               type: "function",
               function: {
@@ -314,28 +316,24 @@ app.post("/api/chat", async (req, res) => {
                 arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
               },
             }];
+            choiceMessage = { role: "assistant", content: null, tool_calls: toolCallsList };
           }
         } catch (_) {}
       }
     }
 
-    if (!parsedToolCalls2) {
+    if (!toolCallsList) {
       return res.json({ content: choice.message.content, searches: null, exaUsed: false });
     }
-
-    const assistantMessage2 = parsedToolCalls2 === choice.message.tool_calls
-      ? choice.message
-      : { role: "assistant", content: null, tool_calls: parsedToolCalls2 };
 
     // Collect searches with defensive parsing
     const allSearches = [];
     const toolCallIds = [];
-    for (const toolCall of parsedToolCalls2) {
+    for (const toolCall of toolCallsList) {
       try {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
 
-        // llama3.1-8b sometimes returns searches as a stringified JSON array
         if (typeof searches === 'string') {
           try { searches = JSON.parse(searches); } catch (_) {}
         }
@@ -392,15 +390,13 @@ app.post("/api/chat", async (req, res) => {
       model,
       messages: [
         ...messages,
-        assistantMessage2,
+        choiceMessage,
         ...toolMessages,
       ],
     });
 
-    const finalContent = finalResponse.choices[0].message.content;
-
     res.json({
-      content: finalContent,
+      content: finalResponse.choices[0].message.content,
       searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,

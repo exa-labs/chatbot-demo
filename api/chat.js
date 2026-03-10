@@ -198,7 +198,6 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
   };
 };
 
-
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -227,15 +226,16 @@ export default async function handler(req, res) {
     const choice = response.choices[0];
 
     // llama3.1-8b sometimes outputs tool calls as content text instead of
-    // using the structured tool_calls field. Detect and parse this case.
-    let parsedToolCalls = choice.message.tool_calls;
-    if (!parsedToolCalls && choice.message.content) {
-      const content = choice.message.content.trim();
-      if (content.startsWith("{") && content.includes('"name"') && content.includes('"arguments"')) {
+    // the structured tool_calls field. Detect and parse this case.
+    let toolCallsList = choice.message.tool_calls;
+    let assistantMessage = choice.message;
+    if (!toolCallsList && choice.message.content) {
+      const trimmed = choice.message.content.trim();
+      if (trimmed.startsWith("{") && trimmed.includes('"name"') && trimmed.includes('"arguments"')) {
         try {
-          const parsed = JSON.parse(content);
+          const parsed = JSON.parse(trimmed);
           if (parsed.name && parsed.arguments) {
-            parsedToolCalls = [{
+            toolCallsList = [{
               id: "manual_tool_call_0",
               type: "function",
               function: {
@@ -243,27 +243,23 @@ export default async function handler(req, res) {
                 arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
               },
             }];
+            assistantMessage = { role: "assistant", content: null, tool_calls: toolCallsList };
           }
         } catch (_) {}
       }
     }
 
-    if (!parsedToolCalls) {
+    if (!toolCallsList) {
       return res.json({ content: choice.message.content, searches: null, exaUsed: false });
     }
 
-    const assistantMessage = parsedToolCalls === choice.message.tool_calls
-      ? choice.message
-      : { role: "assistant", content: null, tool_calls: parsedToolCalls };
-
     const allSearches = [];
     const toolCallIds = [];
-    for (const toolCall of parsedToolCalls) {
+    for (const toolCall of toolCallsList) {
       try {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
 
-        // llama3.1-8b sometimes returns searches as a stringified JSON array
         if (typeof searches === 'string') {
           try { searches = JSON.parse(searches); } catch (_) {}
         }
@@ -325,10 +321,8 @@ export default async function handler(req, res) {
       ],
     });
 
-    const finalContent = finalResponse.choices[0].message.content;
-
     res.json({
-      content: finalContent,
+      content: finalResponse.choices[0].message.content,
       searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,
