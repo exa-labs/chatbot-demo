@@ -140,9 +140,12 @@ app.post("/api/chat/stream", async (req, res) => {
     const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
     console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}`);
 
-    const recentHistory = history.slice(-20).map(msg => ({
+    // Truncate assistant messages to avoid overwhelming the 8B model with long context
+    const recentHistory = history.slice(-10).map(msg => ({
       role: msg.role,
-      content: msg.content,
+      content: msg.role === 'assistant' && msg.content && msg.content.length > 500
+        ? msg.content.slice(0, 500) + '...'
+        : msg.content,
     }));
 
     const messages = [
@@ -359,9 +362,12 @@ app.post("/api/chat", async (req, res) => {
   try {
     const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
 
-    const recentHistory = history.slice(-20).map(msg => ({
+    // Truncate assistant messages to avoid overwhelming the 8B model with long context
+    const recentHistory = history.slice(-10).map(msg => ({
       role: msg.role,
-      content: msg.content,
+      content: msg.role === 'assistant' && msg.content && msg.content.length > 500
+        ? msg.content.slice(0, 500) + '...'
+        : msg.content,
     }));
 
     const messages = [
