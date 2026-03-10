@@ -806,6 +806,8 @@ function MessageContent({ content }) {
     .replace(/```followups[\s\S]*$/g, '')
     .replace(/\n?followups\s*\[.*$/s, '')           // bare followups [...] at end
     .replace(/\{\s*"name"\s*:\s*"web_search"[\s\S]*$/s, '')  // leaked tool call JSON
+    .replace(/```\s*\n?\s*```/g, '')               // empty code fences
+    .replace(/```\w*\s*\n?\s*$/g, '')              // trailing unclosed code fence
     .trim();
 
   let chartData = null;
