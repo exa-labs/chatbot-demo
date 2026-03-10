@@ -455,8 +455,12 @@ export default async function handler(req, res) {
         }
 
         if (Array.isArray(searches)) {
-          const validSearches = searches.filter(s => s && typeof s.query === 'string' && s.query.trim());
-          allSearches.push(...validSearches);
+          const normalized = searches.map(s => {
+            if (typeof s === 'string' && s.trim()) return { query: s.trim() };
+            if (s && typeof s.query === 'string' && s.query.trim()) return s;
+            return null;
+          }).filter(Boolean);
+          allSearches.push(...normalized);
         }
         toolCallIds.push(toolCall.id);
       } catch (e) {
