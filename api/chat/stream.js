@@ -18,11 +18,15 @@ const DEFAULT_MODEL = "llama3.1-8b";
  */
 function tryExtractToolCallFromContent(content) {
   const trimmed = content.trim();
-  if (!trimmed.startsWith("{")) return null;
+
+  // Find the first '{' - model may prefix with "assistant", role text, etc.
+  const jsonStart = trimmed.indexOf("{");
+  if (jsonStart === -1) return null;
+  const jsonCandidate = trimmed.slice(jsonStart);
 
   // Try 1: Direct JSON.parse
   try {
-    const parsed = JSON.parse(trimmed);
+    const parsed = JSON.parse(jsonCandidate);
     let name = parsed.name;
     let args = parsed.arguments || parsed.parameters;
     // Handle {"type": "function", "function": {"name": ..., "arguments": ...}} format
@@ -38,17 +42,19 @@ function tryExtractToolCallFromContent(content) {
     }
   } catch (_) {}
 
-  // Try 2: Regex extraction for malformed JSON (unescaped inner quotes, etc.)
-  const nameMatch = trimmed.match(/"name"\s*:\s*"([^"]+)"/);
+  // Try 2: Regex extraction for malformed JSON (unescaped inner quotes, single quotes, etc.)
+  const nameMatch = jsonCandidate.match(/["']?name["']?\s*:\s*["']([^"']+)["']/);
   if (!nameMatch) return null;
   const name = nameMatch[1];
   if (name !== "web_search") return null;
 
   const queries = [];
-  const queryRegex = /"query"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+  // Match query values with both double and single quotes
+  const queryRegex = /["']?query["']?\s*:\s*["']((?:[^"'\\]|\\.)*)["']/g;
   let match;
-  while ((match = queryRegex.exec(trimmed)) !== null) {
-    queries.push(match[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\'));
+  while ((match = queryRegex.exec(jsonCandidate)) !== null) {
+    const q = match[1].replace(/\\["']/g, m => m[1]).replace(/\\\\/g, '\\');
+    if (q.trim()) queries.push(q.trim());
   }
 
   if (queries.length > 0) {
@@ -424,8 +430,18 @@ export default async function handler(req, res) {
 
     let assistantMessage = { role: "assistant", content: null, tool_calls: null };
 
+    // If content looks like an undetected tool call, retry once
+    if (toolCalls.length === 0 && contentBuffer && contentBuffer.includes("web_search")) {
+      console.log("[Stream] Content looks like undetected tool call, retrying...");
+      ({ toolCalls, contentBuffer } = await streamAndParse());
+    }
+
     if (toolCalls.length === 0) {
-      if (contentBuffer) {
+      // Safety net: suppress raw tool-call-shaped JSON from reaching the client
+      if (contentBuffer && contentBuffer.trim().startsWith("{") && contentBuffer.includes("web_search")) {
+        console.log("[Stream] Suppressing leaked tool call JSON");
+        sendEvent("content", { content: "I encountered an issue processing your request. Please try again." });
+      } else if (contentBuffer) {
         sendEvent("content", { content: contentBuffer });
       }
       sendEvent("done", { exaUsed: false });
@@ -443,7 +459,18 @@ export default async function handler(req, res) {
         let searches = args.searches;
 
         if (typeof searches === 'string') {
-          try { searches = JSON.parse(searches); } catch (_) {}
+          try { searches = JSON.parse(searches); } catch (_) {
+            // Fallback: Python-style dict with single quotes
+            try { searches = JSON.parse(searches.replace(/'/g, '"')); } catch (_2) {
+              // Last resort: regex extract queries from the string
+              const qr = /["']query["']\s*:\s*["']([^"']+)["']/g;
+              let qm; const qMatches = [];
+              while ((qm = qr.exec(searches)) !== null) {
+                qMatches.push({ query: qm[1].trim(), numResults: 5 });
+              }
+              if (qMatches.length > 0) searches = qMatches;
+            }
+          }
         }
 
         if (searches && !Array.isArray(searches)) {
