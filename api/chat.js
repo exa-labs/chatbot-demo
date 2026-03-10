@@ -8,7 +8,7 @@ const client = new OpenAI({
 
 const exa = new Exa(process.env.EXA_API_KEY);
 
-const DEFAULT_MODEL = "gpt-oss-120b";
+const DEFAULT_MODEL = "llama3.3-70b";
 
 const freshnessDefaults = {
   tweet: 48,
@@ -198,66 +198,6 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
   };
 };
 
-/**
- * Strips reasoning artifacts from gpt-oss-120b responses.
- * The model embeds JSON search/cursor objects and internal monologue
- * in the content field when processing tool results. The actual answer
- * always follows after the last artifact.
- */
-function cleanReasoningArtifacts(content) {
-  if (!content) return content;
-
-  // Step 1: Remove citation markers
-  let cleaned = content.replace(/[{【]\d+†[^}】]*[}】]/g, '');  // {14†L0-L3} / 【1†L1-L4】
-  cleaned = cleaned.replace(/\{\d+\}\[\d+\]/g, '');              // {6}[7]
-  cleaned = cleaned.replace(/\[\d+\]/g, '');                      // [1]
-
-  // Step 2: Remove JSON reasoning artifacts (search_query, cursor, etc.)
-  const reasoningPattern = /\{[^{}]*"(?:search_query|search|cursor|topn|source|num_lines|loc|query)"[^{}]*\}/g;
-  let lastEnd = -1;
-  let m;
-  while ((m = reasoningPattern.exec(cleaned)) !== null) {
-    lastEnd = m.index + m[0].length;
-  }
-  if (lastEnd >= 0 && lastEnd < cleaned.length) {
-    cleaned = cleaned.slice(lastEnd);
-  }
-
-  // Step 3: Remove text reasoning markers
-  cleaned = cleaned.replace(/\[Results\][^\n]*/g, '');
-  cleaned = cleaned.replace(/Search results?:\s*\n?/gi, '');
-
-  // Step 4: Ensure **Bold at start of line (model sometimes concatenates reasoning + answer)
-  cleaned = cleaned.replace(/([^*\n])\*\*([A-Z])/g, '$1\n**$2');
-
-  // Step 5: Find where the actual formatted answer starts.
-  // gpt-oss-120b reasoning = plain text; answer = markdown (bold, tables, headings).
-  const boldMatch = cleaned.match(/(?:^|\n)(\*\*[A-Z\u00C0-\u024F][\s\S]*)/);
-  if (boldMatch) {
-    cleaned = boldMatch[1];
-  } else {
-    const headingMatch = cleaned.match(/(?:^|\n)(#{1,6}\s[\s\S]*)/);
-    if (headingMatch) {
-      cleaned = headingMatch[1];
-    } else {
-      const tableMatch = cleaned.match(/(?:^|\n)(\|[^|]+\|[^|]+\|[\s\S]*)/);
-      if (tableMatch) {
-        cleaned = tableMatch[1];
-      } else {
-        const numListMatch = cleaned.match(/(?:^|\n)(\d+\.\s+\*\*[\s\S]*)/);
-        if (numListMatch) {
-          cleaned = numListMatch[1];
-        }
-      }
-    }
-  }
-
-  // Step 6: Clean up whitespace
-  cleaned = cleaned.replace(/  +/g, ' ');
-  cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
-
-  return cleaned || content;
-}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
@@ -282,7 +222,6 @@ export default async function handler(req, res) {
       model,
       messages,
       tools: exaEnabled ? [getSearchTool()] : undefined,
-      reasoning_format: "hidden",
     });
 
     const choice = response.choices[0];
@@ -353,14 +292,12 @@ export default async function handler(req, res) {
         choice.message,
         ...toolMessages,
       ],
-      reasoning_format: "hidden",
     });
 
-    const rawContent = finalResponse.choices[0].message.content;
-    const cleanedContent = cleanReasoningArtifacts(rawContent);
+    const finalContent = finalResponse.choices[0].message.content;
 
     res.json({
-      content: cleanedContent,
+      content: finalContent,
       searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,
