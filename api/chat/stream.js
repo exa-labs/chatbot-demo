@@ -505,11 +505,17 @@ export default async function handler(req, res) {
     // Buffer the full response — gpt-oss-120b mixes reasoning artifacts
     // (JSON search/cursor objects, internal monologue) with the actual answer.
     // We need to collect everything, strip the artifacts, then send clean content.
+    // Send SSE heartbeat comments every 5s to keep the connection alive.
     let fullContent = "";
+    let lastHeartbeat = Date.now();
     for await (const chunk of finalStream) {
       const content = chunk.choices[0]?.delta?.content;
       if (content) {
         fullContent += content;
+      }
+      if (Date.now() - lastHeartbeat > 5000) {
+        res.write(":heartbeat\n\n");
+        lastHeartbeat = Date.now();
       }
     }
 
