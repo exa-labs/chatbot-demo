@@ -207,24 +207,64 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
 function cleanReasoningArtifacts(content) {
   if (!content) return content;
 
-  // Match JSON objects containing reasoning-specific keys
+  // Step 1: Remove citation markers like {14†L0-L3} or 【1†L1-L4】
+  let cleaned = content.replace(/[{【]\d+†[^}】]*[}】]/g, '');
+
+  // Step 2: Find and remove JSON reasoning artifacts
   const reasoningPattern = /\{[^{}]*"(?:search_query|search|cursor|topn|source|num_lines|loc|query)"[^{}]*\}/g;
   let lastEnd = -1;
   let m;
-  while ((m = reasoningPattern.exec(content)) !== null) {
+  while ((m = reasoningPattern.exec(cleaned)) !== null) {
     lastEnd = m.index + m[0].length;
   }
 
-  if (lastEnd >= 0 && lastEnd < content.length) {
-    let answer = content.slice(lastEnd);
-    // Clean remaining text reasoning markers
-    answer = answer.replace(/\[Results\][^\n]*/g, '');
-    answer = answer.replace(/Search results?:\s*\n?/gi, '');
-    answer = answer.trim();
-    if (answer.length > 0) return answer;
+  if (lastEnd >= 0 && lastEnd < cleaned.length) {
+    cleaned = cleaned.slice(lastEnd);
   }
 
-  return content;
+  // Step 3: Remove text reasoning markers
+  cleaned = cleaned.replace(/\[Results\][^\n]*/g, '');
+  cleaned = cleaned.replace(/Search results?:\s*\n?/gi, '');
+
+  // Step 4: Find where the actual formatted answer starts.
+  const lines = cleaned.split('\n');
+  let answerStart = -1;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+
+    if (
+      /^\*\*[A-Z]/.test(line) ||
+      /^#{1,6}\s/.test(line) ||
+      /^\|[^|]+\|[^|]+\|/.test(line) ||
+      /^\d+\.\s+\*\*/.test(line) ||
+      /^- \*\*/.test(line)
+    ) {
+      answerStart = i;
+      break;
+    }
+
+    const midBoldMatch = line.match(/\*\*[A-Z][^*]+\*\*/);
+    if (midBoldMatch && midBoldMatch.index > 0) {
+      lines[i] = line.slice(line.indexOf(midBoldMatch[0]));
+      answerStart = i;
+      break;
+    }
+
+    if (line.length > 100 && /^[A-Z]/.test(line) && !/^(?:The page|Thus |Now |Also |Let |Check |Search |Look |Open |Need |We need|I need)/i.test(line)) {
+      answerStart = i;
+      break;
+    }
+  }
+
+  if (answerStart >= 0) {
+    cleaned = lines.slice(answerStart).join('\n');
+  }
+
+  cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
+
+  return cleaned || content;
 }
 
 export default async function handler(req, res) {
