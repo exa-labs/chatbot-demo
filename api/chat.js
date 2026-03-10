@@ -226,8 +226,7 @@ export default async function handler(req, res) {
     const choice = response.choices[0];
 
     // llama3.1-8b sometimes outputs tool calls as content text instead of
-    // the structured tool_calls field. Detect and parse this case.
-    // The model uses two formats: {name, arguments} or {type, name, parameters}
+    // the structured tool_calls field. Detect and parse both formats.
     let toolCallsList = choice.message.tool_calls;
     let assistantMessage = choice.message;
     if (!toolCallsList && choice.message.content) {

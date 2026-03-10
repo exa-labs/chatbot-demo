@@ -313,34 +313,41 @@ export default async function handler(req, res) {
       { role: "user", content: message },
     ];
 
-    // Send periodic heartbeats to keep the SSE connection alive while
-    // we wait for the non-streaming Cerebras call and Exa search.
-    const heartbeat = setInterval(() => res.write(": heartbeat\n\n"), 5000);
+    const stream = await client.chat.completions.create({
+      model,
+      messages,
+      tools: exaEnabled ? [getSearchTool()] : undefined,
+      stream: true,
+    });
 
-    // Use non-streaming for the initial call to reliably detect tool calls.
-    // llama3.1-8b sometimes outputs tool calls as content text in streaming
-    // mode, which gets sent to the client before we can detect it.
-    let response;
-    try {
-      response = await client.chat.completions.create({
-        model,
-        messages,
-        tools: exaEnabled ? [getSearchTool()] : undefined,
-      });
-    } catch (err) {
-      clearInterval(heartbeat);
-      throw err;
+    let toolCalls = [];
+    let contentBuffer = "";
+    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
+
+    for await (const chunk of stream) {
+      const delta = chunk.choices[0]?.delta;
+
+      if (delta?.content) {
+        contentBuffer += delta.content;
+      }
+
+      if (delta?.tool_calls) {
+        for (const tc of delta.tool_calls) {
+          const idx = tc.index;
+          if (!toolCalls[idx]) {
+            toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
+          }
+          if (tc.id) toolCalls[idx].id = tc.id;
+          if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
+          if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+        }
+      }
     }
 
-    const choice = response.choices[0];
-
     // llama3.1-8b sometimes outputs tool calls as content text instead of
-    // the structured tool_calls field. Detect and parse this case.
-    // The model uses two formats: {name, arguments} or {type, name, parameters}
-    let toolCalls = choice.message.tool_calls || [];
-    let assistantMessage = choice.message;
-    if (toolCalls.length === 0 && choice.message.content) {
-      const trimmed = choice.message.content.trim();
+    // the structured tool_calls field. Detect and parse both formats.
+    if (toolCalls.length === 0 && contentBuffer) {
+      const trimmed = contentBuffer.trim();
       if (trimmed.startsWith("{") && trimmed.includes('"name"') && (trimmed.includes('"arguments"') || trimmed.includes('"parameters"'))) {
         try {
           const parsed = JSON.parse(trimmed);
@@ -354,21 +361,22 @@ export default async function handler(req, res) {
                 arguments: typeof args === 'string' ? args : JSON.stringify(args),
               },
             }];
-            assistantMessage = { role: "assistant", content: null, tool_calls: toolCalls };
+            contentBuffer = "";
           }
         } catch (_) {}
       }
     }
 
     if (toolCalls.length === 0) {
-      clearInterval(heartbeat);
-      const content = choice.message.content;
-      if (content) {
-        sendEvent("content", { content });
+      if (contentBuffer) {
+        sendEvent("content", { content: contentBuffer });
       }
       sendEvent("done", { exaUsed: false });
       return res.end();
     }
+
+    assistantMessage.content = contentBuffer || null;
+    assistantMessage.tool_calls = toolCalls;
 
     const allSearches = [];
     const toolCallIds = [];
@@ -401,7 +409,6 @@ export default async function handler(req, res) {
     }
 
     if (allSearches.length === 0) {
-      clearInterval(heartbeat);
       console.log("No valid searches extracted from tool calls");
       sendEvent("done", { exaUsed: false });
       return res.end();
@@ -450,8 +457,6 @@ export default async function handler(req, res) {
       tool_call_id: id,
       content: resultsText,
     }));
-
-    clearInterval(heartbeat);
 
     const finalStream = await client.chat.completions.create({
       model,
