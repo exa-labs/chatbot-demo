@@ -804,12 +804,16 @@ function MessageContent({ content }) {
     .replace(/```followups\s*\n?[\s\S]*?\n?```/g, '')
     .replace(/```chart[\s\S]*$/g, '')
     .replace(/```followups[\s\S]*$/g, '')
+    .replace(/\n?followups\s*\[.*$/s, '')           // bare followups [...] at end
+    .replace(/\{\s*"name"\s*:\s*"web_search"[\s\S]*$/s, '')  // leaked tool call JSON
     .trim();
 
   let chartData = null;
   if (chartMatch) {
     try {
-      chartData = JSON.parse(chartMatch[1].trim());
+      const parsed = JSON.parse(chartMatch[1].trim());
+      // Only use chart data if it has required fields
+      if (parsed && parsed.labels && parsed.data) chartData = parsed;
     } catch (e) {}
   }
 
