@@ -313,42 +313,23 @@ export default async function handler(req, res) {
       { role: "user", content: message },
     ];
 
-    const stream = await client.chat.completions.create({
+    // Use non-streaming for the initial call to reliably detect tool calls.
+    // llama3.1-8b sometimes outputs tool calls as content text in streaming
+    // mode, which gets sent to the client before we can detect it.
+    const response = await client.chat.completions.create({
       model,
       messages,
       tools: exaEnabled ? [getSearchTool()] : undefined,
-      stream: true,
     });
 
-    let toolCalls = [];
-    let contentBuffer = "";
-    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
-
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-
-      if (delta?.content) {
-        contentBuffer += delta.content;
-        sendEvent("content", { content: delta.content });
-      }
-
-      if (delta?.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index;
-          if (!toolCalls[idx]) {
-            toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
-          }
-          if (tc.id) toolCalls[idx].id = tc.id;
-          if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
-          if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
-        }
-      }
-    }
+    const choice = response.choices[0];
 
     // llama3.1-8b sometimes outputs tool calls as content text instead of
-    // structured tool_calls deltas. Detect and parse this case.
-    if (toolCalls.length === 0 && contentBuffer) {
-      const trimmed = contentBuffer.trim();
+    // the structured tool_calls field. Detect and parse this case.
+    let toolCalls = choice.message.tool_calls || [];
+    let assistantMessage = choice.message;
+    if (toolCalls.length === 0 && choice.message.content) {
+      const trimmed = choice.message.content.trim();
       if (trimmed.startsWith("{") && trimmed.includes('"name"') && trimmed.includes('"arguments"')) {
         try {
           const parsed = JSON.parse(trimmed);
@@ -361,18 +342,20 @@ export default async function handler(req, res) {
                 arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
               },
             }];
+            assistantMessage = { role: "assistant", content: null, tool_calls: toolCalls };
           }
         } catch (_) {}
       }
     }
 
     if (toolCalls.length === 0) {
+      const content = choice.message.content;
+      if (content) {
+        sendEvent("content", { content });
+      }
       sendEvent("done", { exaUsed: false });
       return res.end();
     }
-
-    assistantMessage.content = contentBuffer || null;
-    assistantMessage.tool_calls = toolCalls;
 
     const allSearches = [];
     const toolCallIds = [];
