@@ -81,13 +81,13 @@ function getStartDate(maxAgeHours) {
   return date.toISOString();
 }
 
-async function searchExa(query, category, maxAgeOverride, numResults = 5) {
+async function searchExa(query, category, maxAgeOverride, numResults = 5, searchType = "instant") {
   const searchParams = {
     numResults: Math.min(50, Math.max(3, numResults)),
     highlights: {
       maxCharacters: 4000,
     },
-    type: "auto",
+    type: searchType,
   };
 
   if (category) {
@@ -115,11 +115,11 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5) {
   }));
 }
 
-async function searchMultiple(searches) {
+async function searchMultiple(searches, searchType = "instant") {
   const searchPromises = searches.map(async ({ query, category, maxAgeOverride, numResults = 5 }) => {
     const startTime = Date.now();
     try {
-      const results = await searchExa(query, category, maxAgeOverride, numResults);
+      const results = await searchExa(query, category, maxAgeOverride, numResults, searchType);
       const timeMs = Date.now() - startTime;
       return { query, category, results, timeMs };
     } catch (err) {
@@ -366,8 +366,9 @@ export default async function handler(req, res) {
   };
 
   try {
-    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
-    console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}`);
+    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL, exaMode = "instant" } = req.body;
+    const searchType = exaMode === "fast" ? "keyword" : exaMode || "instant";
+    console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}, exaMode: ${exaMode}`);
 
     // Truncate assistant messages to avoid overwhelming the 8B model with long context
     const recentHistory = history.slice(-10).map(msg => ({
@@ -382,6 +383,28 @@ export default async function handler(req, res) {
       ...recentHistory,
       { role: "user", content: message },
     ];
+
+    // Fast path: direct streaming for non-Exa requests
+    if (!exaEnabled) {
+      const t0 = Date.now();
+      const stream = await client.chat.completions.create({ model, messages, stream: true });
+      let started = false;
+      let initBuf = "";
+      for await (const chunk of stream) {
+        const c = chunk.choices[0]?.delta?.content;
+        if (!c) continue;
+        if (!started) {
+          initBuf += c;
+          const cleaned = initBuf.trimStart().replace(/^\s*assistant\s*/i, "").trimStart();
+          if (cleaned) { sendEvent("content", { content: cleaned }); started = true; }
+          continue;
+        }
+        sendEvent("content", { content: c });
+      }
+      if (!started && initBuf.trim()) sendEvent("content", { content: initBuf.trim() });
+      sendEvent("done", { exaUsed: false, totalMs: Date.now() - t0 });
+      return res.end();
+    }
 
     // Helper: stream a completion and extract tool calls + content
     async function streamAndParse() {
@@ -422,11 +445,13 @@ export default async function handler(req, res) {
     }
 
     // Retry once if model returns empty (llama3.1-8b intermittently returns nothing)
+    const initialCallStart = Date.now();
     let { toolCalls, contentBuffer } = await streamAndParse();
     if (toolCalls.length === 0 && !contentBuffer.trim()) {
       console.log("[Stream] Empty response from model, retrying once...");
       ({ toolCalls, contentBuffer } = await streamAndParse());
     }
+    const initialCallMs = Date.now() - initialCallStart;
 
     let assistantMessage = { role: "assistant", content: null, tool_calls: null };
 
@@ -506,7 +531,7 @@ export default async function handler(req, res) {
 
     console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 5} results)`).join(", ")}`);
     const searchStart = Date.now();
-    const searchResults = await searchMultiple(allSearches);
+    const searchResults = await searchMultiple(allSearches, searchType);
     const searchTimeMs = Date.now() - searchStart;
     const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
     console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms`);
@@ -546,6 +571,7 @@ export default async function handler(req, res) {
       content: resultsText,
     }));
 
+    const finalCallStart = Date.now();
     const finalStream = await client.chat.completions.create({
       model,
       messages: [
@@ -591,7 +617,8 @@ export default async function handler(req, res) {
       }
     }
 
-    sendEvent("done", { exaUsed: true, searchTimeMs, totalSources });
+    const finalCallMs = Date.now() - finalCallStart;
+    sendEvent("done", { exaUsed: true, searchTimeMs, totalSources, initialCallMs, finalCallMs });
     res.end();
 
   } catch (err) {
