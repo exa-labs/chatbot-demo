@@ -295,6 +295,14 @@ export default async function handler(req, res) {
   res.setHeader("Connection", "keep-alive");
   res.flushHeaders();
 
+  // Send initial SSE comment to establish data flow and prevent connection stall
+  res.write(":ok\n\n");
+
+  // Heartbeat to keep SSE connection alive during silent buffering phases
+  const heartbeatInterval = setInterval(() => {
+    res.write(":heartbeat\n\n");
+  }, 3000);
+
   const sendEvent = (event, data) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
@@ -483,5 +491,7 @@ export default async function handler(req, res) {
     console.error(err);
     sendEvent("error", { error: err.message });
     res.end();
+  } finally {
+    clearInterval(heartbeatInterval);
   }
 }
