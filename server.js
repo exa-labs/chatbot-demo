@@ -15,7 +15,7 @@ const client = new OpenAI({
 });
 
 // Default model
-const DEFAULT_MODEL = "llama3.3-70b";
+const DEFAULT_MODEL = "llama3.1-8b";
 
 const getSearchTool = () => {
   const today = new Date().toLocaleDateString('en-US', {

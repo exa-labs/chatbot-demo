@@ -35,7 +35,7 @@ function App() {
   const [isLoading, setIsLoading] = useState(false);
   const [exaEnabled, setExaEnabled] = useState(true);
   const [followups, setFollowups] = useState([]);
-  const [model, setModel] = useState("llama3.3-70b");
+  const [model, setModel] = useState("llama3.1-8b");
   const messagesEndRef = useRef(null);
 
   const currentChat = chats.find(c => c.id === currentChatId) || chats[0];
@@ -272,7 +272,7 @@ function App() {
               <span className="text-black/30">|</span>
               <img src={openaiLogo} alt="OpenAI" className="h-5 w-5 text-black/60" />
             </div>
-            <p className="text-sm text-black/40">Model: llama3.3-70b (70B parameter instruction model)</p>
+            <p className="text-sm text-black/40">Model: llama3.1-8b (8B parameter instruction model)</p>
           </div>
         }
       >

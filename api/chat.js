@@ -8,7 +8,7 @@ const client = new OpenAI({
 
 const exa = new Exa(process.env.EXA_API_KEY);
 
-const DEFAULT_MODEL = "llama3.3-70b";
+const DEFAULT_MODEL = "llama3.1-8b";
 
 const freshnessDefaults = {
   tweet: 48,
