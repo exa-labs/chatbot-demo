@@ -296,7 +296,7 @@ app.post("/api/chat/stream", async (req, res) => {
       content: resultsText,
     }));
 
-    // Stream the final response
+    // Stream the final response, filtering out any tool call JSON the model leaks
     const finalStream = await client.chat.completions.create({
       model,
       messages: [
@@ -307,10 +307,38 @@ app.post("/api/chat/stream", async (req, res) => {
       stream: true,
     });
 
+    let finalBuffer = "";
+    let streaming = false;
     for await (const chunk of finalStream) {
       const content = chunk.choices[0]?.delta?.content;
-      if (content) {
+      if (!content) continue;
+      if (streaming) {
         sendEvent("content", { content });
+        continue;
+      }
+      finalBuffer += content;
+      const trimmed = finalBuffer.trimStart();
+      if (trimmed.startsWith("{")) {
+        if (trimmed.includes("}") && trimmed.indexOf("}") < trimmed.length - 1) {
+          const afterJson = trimmed.slice(trimmed.lastIndexOf("}") + 1);
+          const cleaned = afterJson.replace(/^\s*assistant\s*/i, "").trimStart();
+          if (cleaned) {
+            sendEvent("content", { content: cleaned });
+          }
+          streaming = true;
+        }
+        continue;
+      }
+      const cleaned = trimmed.replace(/^\s*assistant\s*/i, "").trimStart();
+      if (cleaned) {
+        sendEvent("content", { content: cleaned });
+      }
+      streaming = true;
+    }
+    if (!streaming && finalBuffer) {
+      const trimmed = finalBuffer.trim();
+      if (!trimmed.startsWith("{")) {
+        sendEvent("content", { content: trimmed });
       }
     }
 
@@ -437,8 +465,17 @@ app.post("/api/chat", async (req, res) => {
       ],
     });
 
+    let finalContent = finalResponse.choices[0].message.content || "";
+    const trimmedFinal = finalContent.trimStart();
+    if (trimmedFinal.startsWith("{") && trimmedFinal.includes("}")) {
+      const afterJson = trimmedFinal.slice(trimmedFinal.lastIndexOf("}") + 1);
+      finalContent = afterJson.replace(/^\s*assistant\s*/i, "").trim();
+    } else {
+      finalContent = trimmedFinal.replace(/^\s*assistant\s*/i, "").trimStart();
+    }
+
     res.json({
-      content: finalResponse.choices[0].message.content,
+      content: finalContent,
       searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,

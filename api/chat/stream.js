@@ -522,10 +522,38 @@ export default async function handler(req, res) {
       stream: true,
     });
 
+    let finalBuffer = "";
+    let streaming = false;
     for await (const chunk of finalStream) {
       const content = chunk.choices[0]?.delta?.content;
-      if (content) {
+      if (!content) continue;
+      if (streaming) {
         sendEvent("content", { content });
+        continue;
+      }
+      finalBuffer += content;
+      const trimmed = finalBuffer.trimStart();
+      if (trimmed.startsWith("{")) {
+        if (trimmed.includes("}") && trimmed.indexOf("}") < trimmed.length - 1) {
+          const afterJson = trimmed.slice(trimmed.lastIndexOf("}") + 1);
+          const cleaned = afterJson.replace(/^\s*assistant\s*/i, "").trimStart();
+          if (cleaned) {
+            sendEvent("content", { content: cleaned });
+          }
+          streaming = true;
+        }
+        continue;
+      }
+      const cleaned = trimmed.replace(/^\s*assistant\s*/i, "").trimStart();
+      if (cleaned) {
+        sendEvent("content", { content: cleaned });
+      }
+      streaming = true;
+    }
+    if (!streaming && finalBuffer) {
+      const trimmed = finalBuffer.trim();
+      if (!trimmed.startsWith("{")) {
+        sendEvent("content", { content: trimmed });
       }
     }
 
