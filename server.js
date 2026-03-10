@@ -141,6 +141,11 @@ app.post("/api/chat/stream", async (req, res) => {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
 
+        // llama3.1-8b sometimes returns searches as a stringified JSON array
+        if (typeof searches === 'string') {
+          try { searches = JSON.parse(searches); } catch (_) {}
+        }
+
         // Handle case where model returns a single search object instead of array
         if (searches && !Array.isArray(searches)) {
           searches = [searches];
@@ -281,6 +286,11 @@ app.post("/api/chat", async (req, res) => {
       try {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
+
+        // llama3.1-8b sometimes returns searches as a stringified JSON array
+        if (typeof searches === 'string') {
+          try { searches = JSON.parse(searches); } catch (_) {}
+        }
 
         if (searches && !Array.isArray(searches)) {
           searches = [searches];
