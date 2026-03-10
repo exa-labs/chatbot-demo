@@ -364,8 +364,17 @@ export default async function handler(req, res) {
       ],
     });
 
+    let finalContent = finalResponse.choices[0].message.content || "";
+    const trimmedFinal = finalContent.trimStart();
+    if (trimmedFinal.startsWith("{") && trimmedFinal.includes("}")) {
+      const afterJson = trimmedFinal.slice(trimmedFinal.lastIndexOf("}") + 1);
+      finalContent = afterJson.replace(/^\s*assistant\s*/i, "").trim();
+    } else {
+      finalContent = trimmedFinal.replace(/^\s*assistant\s*/i, "").trimStart();
+    }
+
     res.json({
-      content: finalResponse.choices[0].message.content,
+      content: finalContent,
       searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,
