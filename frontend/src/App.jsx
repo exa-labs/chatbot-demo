@@ -560,9 +560,27 @@ function SearchQueryRow({ query, category, sources = [] }) {
           </span>
         )}
         {sources.length > 0 && (
-          <span className="text-[11px] text-[#60646c]">
-            {sources.length} {sources.length === 1 ? 'source' : 'sources'}
-          </span>
+          <div className="flex items-center gap-1.5">
+            {/* Stacked favicons next to source count */}
+            <div className="flex items-center -space-x-1">
+              {sources.slice(0, 4).map((src, i) => {
+                let domain;
+                try { domain = new URL(src.url).hostname; } catch { return null; }
+                return (
+                  <img
+                    key={i}
+                    src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+                    alt=""
+                    className="h-3.5 w-3.5 rounded-full border border-white"
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                );
+              })}
+            </div>
+            <span className="text-[11px] text-[#60646c]">
+              {sources.length} {sources.length === 1 ? 'source' : 'sources'}
+            </span>
+          </div>
         )}
         {sources.length > 0 && (
           expanded ? (
@@ -607,18 +625,14 @@ function SearchQueryRow({ query, category, sources = [] }) {
   );
 }
 
-// Sources banner - shows immediately when Exa returns results (like the instant extension)
-function SourcesBanner({ searches, searchTimeMs, totalSources }) {
-  const [expanded, setExpanded] = useState(false);
+// Flash banner - shows briefly when Exa returns results, vanishes when LLM content starts
+function SourcesFlashBanner({ searches, searchTimeMs, totalSources }) {
   const total = totalSources || searches.reduce((acc, s) => acc + (s.sources || []).length, 0);
   const allSources = searches.flatMap(s => (s.sources || []).map(src => ({ ...src, query: s.query })));
 
   return (
     <div className="rounded-lg border border-[#e5e5e5] bg-[#fafafa] overflow-hidden">
-      <button
-        onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-[#f0f0f0] transition-colors cursor-pointer"
-      >
+      <div className="flex items-center gap-2 px-3 py-2">
         <img src={exaLogomarkBlue} alt="Exa" className="h-3.5 w-3.5 shrink-0" />
         <span className="text-[13px] font-medium text-[#000911] flex-1">
           Exa found {total} source{total !== 1 ? "s" : ""} in{" "}
@@ -640,36 +654,7 @@ function SourcesBanner({ searches, searchTimeMs, totalSources }) {
             );
           })}
         </div>
-        {expanded ? <ChevronUp size={14} className="text-[#60646c]" /> : <ChevronDown size={14} className="text-[#60646c]" />}
-      </button>
-      {expanded && allSources.length > 0 && (
-        <div className="border-t border-[#e5e5e5] max-h-[200px] overflow-y-auto">
-          {allSources.map((src, i) => {
-            let domain;
-            try { domain = new URL(src.url).hostname; } catch { domain = src.url; }
-            return (
-              <a
-                key={i}
-                href={src.url}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="flex items-center gap-2 px-3 py-2 hover:bg-[#f0f0f0] transition-colors border-b border-[#f0f0f0] last:border-0"
-              >
-                <img
-                  src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
-                  alt=""
-                  className="h-4 w-4 shrink-0 rounded"
-                  onError={(e) => { e.target.style.display = 'none'; }}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-[12px] font-medium text-[#000911]">{src.title || "Untitled"}</p>
-                  <p className="text-[10px] text-[#60646c]">{domain}</p>
-                </div>
-              </a>
-            );
-          })}
-        </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -714,11 +699,11 @@ function Message({ message }) {
     );
   }
 
-  // Show sources immediately when Exa returns (before/during LLM streaming)
+  // Flash sources banner when Exa returns (before LLM streaming starts) — vanishes once content arrives
   if (message.searchesReady && message.searches && !message.content) {
     return (
       <div className="animate-message-in">
-        <SourcesBanner searches={message.searches} searchTimeMs={message.searchTimeMs} totalSources={message.totalSources} />
+        <SourcesFlashBanner searches={message.searches} searchTimeMs={message.searchTimeMs} totalSources={message.totalSources} />
         <div className="mt-3">
           <LoadingRings searching={false} queries={[]} />
         </div>
@@ -751,17 +736,10 @@ function Message({ message }) {
           <p className="text-[14px]">{message.content}</p>
         ) : (
           <>
-            {/* Show sources banner at top when available (during or after streaming) */}
-            {message.searchesReady && message.searches && message.searches.length > 0 && (
-              <div className="mb-3">
-                <SourcesBanner searches={message.searches} searchTimeMs={message.searchTimeMs} totalSources={message.totalSources} />
-              </div>
-            )}
-
             <MessageContent content={message.content} />
 
-            {/* Legacy source rows at bottom (only if no banner shown) */}
-            {!message.searchesReady && !message.streaming && message.searches && message.searches.length > 0 && (
+            {/* Source rows at bottom (original format with favicons) */}
+            {!message.streaming && message.searches && message.searches.length > 0 && (
               <div className="mt-4 border-t border-[#e5e5e5] pt-4">
                 {message.searches.map((search, i) => (
                   <SearchQueryRow
