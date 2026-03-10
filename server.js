@@ -92,51 +92,46 @@ app.post("/api/chat/stream", async (req, res) => {
       { role: "user", content: message },
     ];
 
-    // Stream first call to detect tool calls while streaming
-    const stream = await client.chat.completions.create({
-      model,
-      messages,
-      tools: exaEnabled ? [getSearchTool()] : undefined,
-      stream: true,
-    });
+    // Use non-streaming for the initial call when tools are enabled.
+    // llama3.1-8b on Cerebras outputs tool calls as content text in streaming
+    // mode instead of structured tool_calls deltas.
+    if (exaEnabled) {
+      const response = await client.chat.completions.create({
+        model,
+        messages,
+        tools: [getSearchTool()],
+      });
 
-    // Accumulate tool calls and content from stream
-    let toolCalls = [];
-    let contentBuffer = "";
-    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
+      const choice = response.choices[0];
 
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-
-      // Stream content immediately
-      if (delta?.content) {
-        contentBuffer += delta.content;
-        sendEvent("content", { content: delta.content });
+      if (!choice.message.tool_calls) {
+        const content = choice.message.content;
+        if (content) {
+          sendEvent("content", { content });
+        }
+        sendEvent("done", { exaUsed: false });
+        return res.end();
       }
 
-      // Accumulate tool calls
-      if (delta?.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index;
-          if (!toolCalls[idx]) {
-            toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
-          }
-          if (tc.id) toolCalls[idx].id = tc.id;
-          if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
-          if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+      var toolCalls = choice.message.tool_calls;
+      var assistantMessage = choice.message;
+    } else {
+      const stream = await client.chat.completions.create({
+        model,
+        messages,
+        stream: true,
+      });
+
+      for await (const chunk of stream) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          sendEvent("content", { content });
         }
       }
-    }
 
-    // No tool calls - we already streamed the response
-    if (toolCalls.length === 0) {
       sendEvent("done", { exaUsed: false });
       return res.end();
     }
-
-    // Build assistant message for tool call flow
-    assistantMessage.content = contentBuffer || null;
-    assistantMessage.tool_calls = toolCalls;
 
     // Collect searches with defensive parsing for different model formats
     const allSearches = [];
