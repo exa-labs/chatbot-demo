@@ -102,26 +102,32 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5, search
 
   const response = await exa.searchAndContents(query, searchParams);
 
+  // Exa API returns requestTime (seconds) — convert to ms for latency display
+  const exaServerTimeMs = response.requestTime ? Math.round(response.requestTime * 1000) : null;
+
   if (!response.results || response.results.length === 0) {
-    return [];
+    return { results: [], exaServerTimeMs };
   }
 
-  return response.results.map((r) => ({
-    title: r.title,
-    url: r.url,
-    text: (r.highlights || []).join("\n").slice(0, 4000),
-    publishedDate: r.publishedDate,
-    author: r.author,
-  }));
+  return {
+    results: response.results.map((r) => ({
+      title: r.title,
+      url: r.url,
+      text: (r.highlights || []).join("\n").slice(0, 4000),
+      publishedDate: r.publishedDate,
+      author: r.author,
+    })),
+    exaServerTimeMs,
+  };
 }
 
 async function searchMultiple(searches, searchType = "instant") {
   const searchPromises = searches.map(async ({ query, category, maxAgeOverride, numResults = 5 }) => {
     const startTime = Date.now();
     try {
-      const results = await searchExa(query, category, maxAgeOverride, numResults, searchType);
+      const { results, exaServerTimeMs } = await searchExa(query, category, maxAgeOverride, numResults, searchType);
       const timeMs = Date.now() - startTime;
-      return { query, category, results, timeMs };
+      return { query, category, results, timeMs, exaServerTimeMs };
     } catch (err) {
       const timeMs = Date.now() - startTime;
       return { query, category, results: [], error: err.message, timeMs };
@@ -269,28 +275,13 @@ WITH SEARCH: [What the current data shows]
 
 Only include this callout when there's a meaningful difference.
 
-CHARTS - When data is numeric and comparative, include a chart block:
-Use charts for: stock prices, rankings, comparisons, statistics, polls, market share, trends over time.
-Do NOT use charts for: general news, explanations, single facts, non-numeric info.
-
-Format (place AFTER your prose response):
+CHARTS - Only include charts when the user EXPLICITLY asks for visual data, graphs, or charts.
+Do NOT proactively generate charts. Focus on clear, well-written prose responses.
+If the user asks for a chart, use this format (place AFTER your prose response):
 \`\`\`chart
 {"type":"bar","title":"Chart Title","labels":["A","B","C"],"data":[10,20,30]}
 \`\`\`
-
 Types: "bar", "line", "pie", "doughnut"
-- bar/line: for comparisons, rankings, trends
-- pie/doughnut: for market share, distributions (parts of whole)
-
-CHART BEST PRACTICES:
-- Use descriptive, compelling titles (not just "Data" - say "NFL Coach of the Year Odds" or "Market Share by Company")
-- Keep labels SHORT (abbreviate if needed: "Minnesota" -> "MIN", "Microsoft" -> "MSFT")
-- Order data meaningfully: rank by value (highest to lowest) or chronologically for trends
-- For percentages, ensure they add to 100 for pie/doughnut
-- Round numbers for cleaner display (89.7% -> 90%, $1,234,567 -> $1.2M)
-- Limit to 5-8 data points max for readability - combine smaller values into "Other" if needed
-- For line charts showing trends, use consistent time intervals
-- Be thoughtful about scale - the graph needs to show change over time and thus you must pick time range and axis scaling that is appropriate for good visualization
 `;
 };
 
@@ -534,10 +525,13 @@ export default async function handler(req, res) {
     const searchResults = await searchMultiple(allSearches, searchType);
     const searchTimeMs = Date.now() - searchStart;
     const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
-    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms`);
+    // Use Exa's server-side processing time (like the instant extension does) for more accurate latency
+    const exaServerTimeMs = searchResults.reduce((best, s) => Math.max(best, s.exaServerTimeMs || 0), 0) || null;
+    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms (server: ${exaServerTimeMs}ms)`);
 
     sendEvent("search_complete", {
       searchTimeMs,
+      exaServerTimeMs,
       totalSources,
       searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
@@ -618,7 +612,7 @@ export default async function handler(req, res) {
     }
 
     const finalCallMs = Date.now() - finalCallStart;
-    sendEvent("done", { exaUsed: true, searchTimeMs, totalSources, initialCallMs, finalCallMs });
+    sendEvent("done", { exaUsed: true, searchTimeMs, exaServerTimeMs, totalSources, initialCallMs, finalCallMs });
     res.end();
 
   } catch (err) {

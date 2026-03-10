@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight } from "lucide-react";
 import { ToggleElevated, CardGalleryItem } from "./components";
 import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
 import { PageHeader } from "./components/PageHeader";
@@ -117,18 +117,26 @@ async function streamPane({ message, history, exaEnabled, exaMode, assistantId, 
 
         if (data.searches) {
           searches = data.searches;
-          searchTimeMs = data.searchTimeMs;
+          searchTimeMs = data.exaServerTimeMs || data.searchTimeMs;
           totalSources = data.totalSources;
+          // Show sources immediately when Exa returns (before LLM streaming starts)
+          if (batchTimeout) clearTimeout(batchTimeout);
+          flushContent();
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantId ? { ...msg, searching: false, searchesReady: true, searches: data.searches, totalSources: data.totalSources, searchTimeMs: data.exaServerTimeMs || data.searchTimeMs } : msg
+          ));
         }
 
         if (data.exaUsed !== undefined) {
           const totalMs = Date.now() - startTime;
           if (exaEnabled && data.exaUsed) {
             const cerebrasMs = (data.initialCallMs || 0) + (data.finalCallMs || 0);
+            // Use Exa's server-side processing time (like instant extension) for more accurate latency
+            const exaMs = data.exaServerTimeMs || data.searchTimeMs || searchTimeMs || 0;
             setLatency({
               totalMs,
-              exaMs: data.searchTimeMs || searchTimeMs || 0,
-              cerebrasMs: cerebrasMs || (totalMs - (data.searchTimeMs || searchTimeMs || 0)),
+              exaMs,
+              cerebrasMs: cerebrasMs || (totalMs - exaMs),
             });
           } else {
             setLatency({ totalMs: data.totalMs || totalMs });
@@ -268,7 +276,7 @@ function App() {
       <div className="flex flex-1 min-h-0">
         {/* Left Pane - Without Exa */}
         <div className="flex-1 flex flex-col border-r border-[#e5e5e5]">
-          <div className="flex items-center justify-between px-4 py-2 bg-[#fafafa] border-b border-[#e5e5e5] shrink-0">
+          <div className="flex items-center justify-between px-4 h-10 bg-[#fafafa] border-b border-[#e5e5e5] shrink-0">
             <div className="flex items-center gap-2">
               <div className="h-2 w-2 rounded-full bg-[#d4d4d4]" />
               <span className="text-[13px] font-semibold text-[#000911]">Without Exa</span>
@@ -292,12 +300,12 @@ function App() {
 
         {/* Right Pane - With Exa */}
         <div className="flex-1 flex flex-col">
-          <div className="flex items-center justify-between px-4 py-2 bg-[#fafafa] border-b border-[#e5e5e5] shrink-0">
+          <div className="flex items-center justify-between px-4 h-10 bg-[#fafafa] border-b border-[#e5e5e5] shrink-0">
             <div className="flex items-center gap-2">
               <img src={exaLogomarkBlue} alt="Exa" className="h-3.5 w-3.5" />
               <span className="text-[13px] font-semibold text-[#000911]">With Exa</span>
             </div>
-            <ModeToggle mode={exaMode} onChange={setExaMode} disabled={rightLoading} />
+            <ModeDropdown mode={exaMode} onChange={setExaMode} disabled={rightLoading} />
           </div>
 
           <div ref={rightScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
@@ -327,29 +335,55 @@ function App() {
   );
 }
 
-// Mode toggle: instant / fast / auto
-function ModeToggle({ mode, onChange, disabled }) {
+// Mode dropdown: instant / fast / auto
+function ModeDropdown({ mode, onChange, disabled }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
   const modes = [
     { value: "instant", label: "Instant" },
     { value: "fast", label: "Fast" },
     { value: "auto", label: "Auto" },
   ];
 
+  const current = modes.find(m => m.value === mode) || modes[0];
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
   return (
-    <div className="flex items-center gap-0.5 rounded-lg bg-[#f0f0f0] p-0.5">
-      {modes.map(m => (
-        <button
-          key={m.value}
-          onClick={() => !disabled && onChange(m.value)}
-          className={`px-2.5 py-1 rounded-md text-[11px] font-medium transition-all ${
-            mode === m.value
-              ? "bg-white text-[#000911] shadow-sm"
-              : "text-[#60646c] hover:text-[#000911]"
-          } ${disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"}`}
-        >
-          {m.label}
-        </button>
-      ))}
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => !disabled && setOpen(!open)}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[#e5e5e5] bg-white text-[11px] font-medium text-[#000911] transition-all hover:border-[#0040f0] ${
+          disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+        }`}
+      >
+        {current.label}
+        <ChevronDown size={12} className={`text-[#60646c] transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 min-w-[100px] rounded-lg border border-[#e5e5e5] bg-white shadow-lg py-1">
+          {modes.map(m => (
+            <button
+              key={m.value}
+              onClick={() => { onChange(m.value); setOpen(false); }}
+              className={`w-full text-left px-3 py-1.5 text-[12px] transition-colors ${
+                mode === m.value
+                  ? "font-semibold text-[#0040f0] bg-[#f0f4ff]"
+                  : "text-[#000911] hover:bg-[#fafafa]"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -573,6 +607,73 @@ function SearchQueryRow({ query, category, sources = [] }) {
   );
 }
 
+// Sources banner - shows immediately when Exa returns results (like the instant extension)
+function SourcesBanner({ searches, searchTimeMs, totalSources }) {
+  const [expanded, setExpanded] = useState(false);
+  const total = totalSources || searches.reduce((acc, s) => acc + (s.sources || []).length, 0);
+  const allSources = searches.flatMap(s => (s.sources || []).map(src => ({ ...src, query: s.query })));
+
+  return (
+    <div className="rounded-lg border border-[#e5e5e5] bg-[#fafafa] overflow-hidden">
+      <button
+        onClick={() => setExpanded(!expanded)}
+        className="flex items-center gap-2 w-full px-3 py-2 text-left hover:bg-[#f0f0f0] transition-colors cursor-pointer"
+      >
+        <img src={exaLogomarkBlue} alt="Exa" className="h-3.5 w-3.5 shrink-0" />
+        <span className="text-[13px] font-medium text-[#000911] flex-1">
+          Exa found {total} source{total !== 1 ? "s" : ""} in{" "}
+          <span className="text-[#0040f0] font-semibold">{(searchTimeMs || 0).toLocaleString()}ms</span>
+        </span>
+        {/* Stacked favicons */}
+        <div className="flex items-center -space-x-1.5">
+          {allSources.slice(0, 5).map((src, i) => {
+            let domain;
+            try { domain = new URL(src.url).hostname; } catch { return null; }
+            return (
+              <img
+                key={i}
+                src={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`}
+                alt=""
+                className="h-4 w-4 rounded-full border border-white"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            );
+          })}
+        </div>
+        {expanded ? <ChevronUp size={14} className="text-[#60646c]" /> : <ChevronDown size={14} className="text-[#60646c]" />}
+      </button>
+      {expanded && allSources.length > 0 && (
+        <div className="border-t border-[#e5e5e5] max-h-[200px] overflow-y-auto">
+          {allSources.map((src, i) => {
+            let domain;
+            try { domain = new URL(src.url).hostname; } catch { domain = src.url; }
+            return (
+              <a
+                key={i}
+                href={src.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="flex items-center gap-2 px-3 py-2 hover:bg-[#f0f0f0] transition-colors border-b border-[#f0f0f0] last:border-0"
+              >
+                <img
+                  src={`https://www.google.com/s2/favicons?domain=${domain}&sz=32`}
+                  alt=""
+                  className="h-4 w-4 shrink-0 rounded"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-[12px] font-medium text-[#000911]">{src.title || "Untitled"}</p>
+                  <p className="text-[10px] text-[#60646c]">{domain}</p>
+                </div>
+              </a>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function Message({ message }) {
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
@@ -591,11 +692,12 @@ function Message({ message }) {
     return <LoadingRings searching={false} queries={[]} />;
   }
 
-  if (message.streaming && !message.content && message.queries && message.queries.length > 0) {
+  // Show searching state with query cards (before Exa returns)
+  if (message.streaming && !message.content && !message.searchesReady && message.queries && message.queries.length > 0) {
     return (
       <div className="animate-message-in">
         <div className="inline-flex flex-col gap-2 px-1 py-2">
-          <span className="text-[13px] text-[#60646c] mb-1">Searching for</span>
+          <span className="text-[13px] text-[#60646c] mb-1">Searching...</span>
           <div className="space-y-2">
             {message.queries.map((query, i) => (
               <div
@@ -607,6 +709,18 @@ function Message({ message }) {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Show sources immediately when Exa returns (before/during LLM streaming)
+  if (message.searchesReady && message.searches && !message.content) {
+    return (
+      <div className="animate-message-in">
+        <SourcesBanner searches={message.searches} searchTimeMs={message.searchTimeMs} totalSources={message.totalSources} />
+        <div className="mt-3">
+          <LoadingRings searching={false} queries={[]} />
         </div>
       </div>
     );
@@ -637,9 +751,17 @@ function Message({ message }) {
           <p className="text-[14px]">{message.content}</p>
         ) : (
           <>
+            {/* Show sources banner at top when available (during or after streaming) */}
+            {message.searchesReady && message.searches && message.searches.length > 0 && (
+              <div className="mb-3">
+                <SourcesBanner searches={message.searches} searchTimeMs={message.searchTimeMs} totalSources={message.totalSources} />
+              </div>
+            )}
+
             <MessageContent content={message.content} />
 
-            {!message.streaming && message.searches && message.searches.length > 0 && (
+            {/* Legacy source rows at bottom (only if no banner shown) */}
+            {!message.searchesReady && !message.streaming && message.searches && message.searches.length > 0 && (
               <div className="mt-4 border-t border-[#e5e5e5] pt-4">
                 {message.searches.map((search, i) => (
                   <SearchQueryRow
