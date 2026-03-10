@@ -207,17 +207,18 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
 function cleanReasoningArtifacts(content) {
   if (!content) return content;
 
-  // Step 1: Remove citation markers like {14†L0-L3} or 【1†L1-L4】
-  let cleaned = content.replace(/[{【]\d+†[^}】]*[}】]/g, '');
+  // Step 1: Remove citation markers
+  let cleaned = content.replace(/[{【]\d+†[^}】]*[}】]/g, '');  // {14†L0-L3} / 【1†L1-L4】
+  cleaned = cleaned.replace(/\{\d+\}\[\d+\]/g, '');              // {6}[7]
+  cleaned = cleaned.replace(/\[\d+\]/g, '');                      // [1]
 
-  // Step 2: Find and remove JSON reasoning artifacts
+  // Step 2: Remove JSON reasoning artifacts (search_query, cursor, etc.)
   const reasoningPattern = /\{[^{}]*"(?:search_query|search|cursor|topn|source|num_lines|loc|query)"[^{}]*\}/g;
   let lastEnd = -1;
   let m;
   while ((m = reasoningPattern.exec(cleaned)) !== null) {
     lastEnd = m.index + m[0].length;
   }
-
   if (lastEnd >= 0 && lastEnd < cleaned.length) {
     cleaned = cleaned.slice(lastEnd);
   }
@@ -226,42 +227,33 @@ function cleanReasoningArtifacts(content) {
   cleaned = cleaned.replace(/\[Results\][^\n]*/g, '');
   cleaned = cleaned.replace(/Search results?:\s*\n?/gi, '');
 
-  // Step 4: Find where the actual formatted answer starts.
-  const lines = cleaned.split('\n');
-  let answerStart = -1;
+  // Step 4: Ensure **Bold at start of line (model sometimes concatenates reasoning + answer)
+  cleaned = cleaned.replace(/([^*\n])\*\*([A-Z])/g, '$1\n**$2');
 
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i].trim();
-    if (!line) continue;
-
-    if (
-      /^\*\*[A-Z]/.test(line) ||
-      /^#{1,6}\s/.test(line) ||
-      /^\|[^|]+\|[^|]+\|/.test(line) ||
-      /^\d+\.\s+\*\*/.test(line) ||
-      /^- \*\*/.test(line)
-    ) {
-      answerStart = i;
-      break;
-    }
-
-    const midBoldMatch = line.match(/\*\*[A-Z][^*]+\*\*/);
-    if (midBoldMatch && midBoldMatch.index > 0) {
-      lines[i] = line.slice(line.indexOf(midBoldMatch[0]));
-      answerStart = i;
-      break;
-    }
-
-    if (line.length > 100 && /^[A-Z]/.test(line) && !/^(?:The page|Thus |Now |Also |Let |Check |Search |Look |Open |Need |We need|I need)/i.test(line)) {
-      answerStart = i;
-      break;
+  // Step 5: Find where the actual formatted answer starts.
+  // gpt-oss-120b reasoning = plain text; answer = markdown (bold, tables, headings).
+  const boldMatch = cleaned.match(/(?:^|\n)(\*\*[A-Z\u00C0-\u024F][\s\S]*)/);
+  if (boldMatch) {
+    cleaned = boldMatch[1];
+  } else {
+    const headingMatch = cleaned.match(/(?:^|\n)(#{1,6}\s[\s\S]*)/);
+    if (headingMatch) {
+      cleaned = headingMatch[1];
+    } else {
+      const tableMatch = cleaned.match(/(?:^|\n)(\|[^|]+\|[^|]+\|[\s\S]*)/);
+      if (tableMatch) {
+        cleaned = tableMatch[1];
+      } else {
+        const numListMatch = cleaned.match(/(?:^|\n)(\d+\.\s+\*\*[\s\S]*)/);
+        if (numListMatch) {
+          cleaned = numListMatch[1];
+        }
+      }
     }
   }
 
-  if (answerStart >= 0) {
-    cleaned = lines.slice(answerStart).join('\n');
-  }
-
+  // Step 6: Clean up whitespace
+  cleaned = cleaned.replace(/  +/g, ' ');
   cleaned = cleaned.replace(/\n{3,}/g, '\n\n').trim();
 
   return cleaned || content;
