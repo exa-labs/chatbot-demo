@@ -10,6 +10,57 @@ const exa = new Exa(process.env.EXA_API_KEY);
 
 const DEFAULT_MODEL = "llama3.1-8b";
 
+/**
+ * Attempt to parse a tool call from content text that the model output
+ * instead of using the structured tool_calls field.
+ * Handles multiple malformed JSON formats from llama3.1-8b.
+ * Returns { name, arguments } or null.
+ */
+function tryExtractToolCallFromContent(content) {
+  const trimmed = content.trim();
+  if (!trimmed.startsWith("{")) return null;
+
+  // Try 1: Direct JSON.parse
+  try {
+    const parsed = JSON.parse(trimmed);
+    let name = parsed.name;
+    let args = parsed.arguments || parsed.parameters;
+    if (!name && parsed.function) {
+      name = parsed.function.name;
+      args = parsed.function.arguments || parsed.function.parameters;
+    }
+    if (name && args) {
+      return {
+        name,
+        arguments: typeof args === 'string' ? args : JSON.stringify(args),
+      };
+    }
+  } catch (_) {}
+
+  // Try 2: Regex extraction for malformed JSON (unescaped inner quotes, etc.)
+  const nameMatch = trimmed.match(/"name"\s*:\s*"([^"]+)"/);
+  if (!nameMatch) return null;
+  const name = nameMatch[1];
+  if (name !== "web_search") return null;
+
+  const queries = [];
+  const queryRegex = /"query"\s*:\s*"((?:[^"\\]|\\.)*)"/g;
+  let match;
+  while ((match = queryRegex.exec(trimmed)) !== null) {
+    queries.push(match[1].replace(/\\"/g, '"').replace(/\\\\/g, '\\'));
+  }
+
+  if (queries.length > 0) {
+    const searches = queries.map(q => ({ query: q, numResults: 5 }));
+    return {
+      name,
+      arguments: JSON.stringify({ searches }),
+    };
+  }
+
+  return null;
+}
+
 const freshnessDefaults = {
   tweet: 48,
   research_paper: 4320,
@@ -230,23 +281,14 @@ export default async function handler(req, res) {
     let toolCallsList = choice.message.tool_calls;
     let assistantMessage = choice.message;
     if (!toolCallsList && choice.message.content) {
-      const trimmed = choice.message.content.trim();
-      if (trimmed.startsWith("{") && trimmed.includes('"name"') && (trimmed.includes('"arguments"') || trimmed.includes('"parameters"'))) {
-        try {
-          const parsed = JSON.parse(trimmed);
-          const args = parsed.arguments || parsed.parameters;
-          if (parsed.name && args) {
-            toolCallsList = [{
-              id: "manual_tool_call_0",
-              type: "function",
-              function: {
-                name: parsed.name,
-                arguments: typeof args === 'string' ? args : JSON.stringify(args),
-              },
-            }];
-            assistantMessage = { role: "assistant", content: null, tool_calls: toolCallsList };
-          }
-        } catch (_) {}
+      const extracted = tryExtractToolCallFromContent(choice.message.content);
+      if (extracted) {
+        toolCallsList = [{
+          id: "manual_tool_call_0",
+          type: "function",
+          function: extracted,
+        }];
+        assistantMessage = { role: "assistant", content: null, tool_calls: toolCallsList };
       }
     }
 
