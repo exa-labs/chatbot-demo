@@ -104,20 +104,22 @@ app.post("/api/chat/stream", async (req, res) => {
 
     // llama3.1-8b sometimes outputs tool calls as content text instead of
     // the structured tool_calls field. Detect and parse this case.
+    // The model uses two formats: {name, arguments} or {type, name, parameters}
     let toolCalls = choice.message.tool_calls || [];
     let assistantMessage = choice.message;
     if (toolCalls.length === 0 && choice.message.content) {
       const trimmed = choice.message.content.trim();
-      if (trimmed.startsWith("{") && trimmed.includes('"name"') && trimmed.includes('"arguments"')) {
+      if (trimmed.startsWith("{") && trimmed.includes('"name"') && (trimmed.includes('"arguments"') || trimmed.includes('"parameters"'))) {
         try {
           const parsed = JSON.parse(trimmed);
-          if (parsed.name && parsed.arguments) {
+          const args = parsed.arguments || parsed.parameters;
+          if (parsed.name && args) {
             toolCalls = [{
               id: "manual_tool_call_0",
               type: "function",
               function: {
                 name: parsed.name,
-                arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
+                arguments: typeof args === 'string' ? args : JSON.stringify(args),
               },
             }];
             assistantMessage = { role: "assistant", content: null, tool_calls: toolCalls };
@@ -277,20 +279,22 @@ app.post("/api/chat", async (req, res) => {
 
     // llama3.1-8b sometimes outputs tool calls as content text instead of
     // the structured tool_calls field. Detect and parse this case.
+    // The model uses two formats: {name, arguments} or {type, name, parameters}
     let toolCallsList = choice.message.tool_calls;
     let choiceMessage = choice.message;
     if (!toolCallsList && choice.message.content) {
       const trimmed = choice.message.content.trim();
-      if (trimmed.startsWith("{") && trimmed.includes('"name"') && trimmed.includes('"arguments"')) {
+      if (trimmed.startsWith("{") && trimmed.includes('"name"') && (trimmed.includes('"arguments"') || trimmed.includes('"parameters"'))) {
         try {
           const parsed = JSON.parse(trimmed);
-          if (parsed.name && parsed.arguments) {
+          const args = parsed.arguments || parsed.parameters;
+          if (parsed.name && args) {
             toolCallsList = [{
               id: "manual_tool_call_0",
               type: "function",
               function: {
                 name: parsed.name,
-                arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
+                arguments: typeof args === 'string' ? args : JSON.stringify(args),
               },
             }];
             choiceMessage = { role: "assistant", content: null, tool_calls: toolCallsList };
