@@ -10,7 +10,6 @@ import Lottie from "lottie-react";
 import { getApiPath } from "./lib/basePath";
 import exaLogomarkBlue from "./assets/exa-logomark-blue.svg";
 import cerebrasLogo from "./assets/cerebras-logo.svg";
-import openaiLogo from "./assets/openai-logo.svg";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Line, Pie, Doughnut } from 'react-chartjs-2';
 import ReactMarkdown from 'react-markdown';
@@ -269,20 +268,11 @@ function App() {
             <div className="flex items-center gap-2">
               <span>Powered by Cerebras inference</span>
               <img src={cerebrasLogo} alt="Cerebras" className="h-5 w-5" />
-              <span className="text-black/30">|</span>
-              <img src={openaiLogo} alt="OpenAI" className="h-5 w-5 text-black/60" />
             </div>
             <p className="text-sm text-black/40">Model: llama3.1-8b (8B parameter instruction model)</p>
           </div>
         }
-      >
-        <div className="mt-6 grid grid-cols-1 sm:grid-cols-2 gap-x-8 gap-y-2">
-          <p className="text-sm text-black/50"><span className="font-medium text-black/70">Model agnostic:</span> Works with OpenAI, Anthropic, or any open-source model</p>
-          <p className="text-sm text-black/50"><span className="font-medium text-black/70">Superior search:</span> Faster, more relevant, and more comprehensive than model search calling</p>
-          <p className="text-sm text-black/50"><span className="font-medium text-black/70">Always current:</span> Real-time information instead of stale training data</p>
-          <p className="text-sm text-black/50"><span className="font-medium text-black/70">Configurable:</span> Exa's model parameters can dynamically be adjusted for any use case</p>
-        </div>
-      </PageHeader>
+      />
 
       {/* Chat Area */}
       <main className="relative z-[1] flex-1 overflow-y-auto">
