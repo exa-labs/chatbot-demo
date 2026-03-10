@@ -268,32 +268,38 @@ export default async function handler(req, res) {
       { role: "user", content: message },
     ];
 
-    const response = await client.chat.completions.create({
-      model,
-      messages,
-      tools: exaEnabled ? [getSearchTool()] : undefined,
-    });
+    // Helper: call model and detect tool calls
+    async function callAndParse() {
+      const resp = await client.chat.completions.create({
+        model,
+        messages,
+        tools: exaEnabled ? [getSearchTool()] : undefined,
+      });
 
-    const choice = response.choices[0];
+      const ch = resp.choices[0];
+      let tcList = ch.message.tool_calls;
+      let msg = ch.message;
 
-    // llama3.1-8b sometimes outputs tool calls as content text instead of
-    // the structured tool_calls field. Detect and parse both formats.
-    let toolCallsList = choice.message.tool_calls;
-    let assistantMessage = choice.message;
-    if (!toolCallsList && choice.message.content) {
-      const extracted = tryExtractToolCallFromContent(choice.message.content);
-      if (extracted) {
-        toolCallsList = [{
-          id: "manual_tool_call_0",
-          type: "function",
-          function: extracted,
-        }];
-        assistantMessage = { role: "assistant", content: null, tool_calls: toolCallsList };
+      if (!tcList && ch.message.content) {
+        const extracted = tryExtractToolCallFromContent(ch.message.content);
+        if (extracted) {
+          tcList = [{ id: "manual_tool_call_0", type: "function", function: extracted }];
+          msg = { role: "assistant", content: null, tool_calls: tcList };
+        }
       }
+
+      return { toolCallsList: tcList, assistantMessage: msg, content: ch.message.content };
+    }
+
+    // Retry once if model returns empty (llama3.1-8b intermittently returns nothing)
+    let { toolCallsList, assistantMessage, content } = await callAndParse();
+    if (!toolCallsList && (!content || !content.trim())) {
+      console.log("[Chat] Empty response from model, retrying once...");
+      ({ toolCallsList, assistantMessage, content } = await callAndParse());
     }
 
     if (!toolCallsList) {
-      return res.json({ content: choice.message.content, searches: null, exaUsed: false });
+      return res.json({ content: content, searches: null, exaUsed: false });
     }
 
     const allSearches = [];

@@ -374,50 +374,52 @@ export default async function handler(req, res) {
       { role: "user", content: message },
     ];
 
-    const stream = await client.chat.completions.create({
-      model,
-      messages,
-      tools: exaEnabled ? [getSearchTool()] : undefined,
-      stream: true,
-    });
+    // Helper: stream a completion and extract tool calls + content
+    async function streamAndParse() {
+      const s = await client.chat.completions.create({
+        model,
+        messages,
+        tools: exaEnabled ? [getSearchTool()] : undefined,
+        stream: true,
+      });
 
-    let toolCalls = [];
-    let contentBuffer = "";
-    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
+      let tc = [];
+      let buf = "";
 
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-
-      if (delta?.content) {
-        contentBuffer += delta.content;
-      }
-
-      if (delta?.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index;
-          if (!toolCalls[idx]) {
-            toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
+      for await (const chunk of s) {
+        const delta = chunk.choices[0]?.delta;
+        if (delta?.content) buf += delta.content;
+        if (delta?.tool_calls) {
+          for (const call of delta.tool_calls) {
+            const idx = call.index;
+            if (!tc[idx]) tc[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
+            if (call.id) tc[idx].id = call.id;
+            if (call.function?.name) tc[idx].function.name = call.function.name;
+            if (call.function?.arguments) tc[idx].function.arguments += call.function.arguments;
           }
-          if (tc.id) toolCalls[idx].id = tc.id;
-          if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
-          if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
         }
       }
+
+      // Detect tool calls output as content text
+      if (tc.length === 0 && buf) {
+        const extracted = tryExtractToolCallFromContent(buf);
+        if (extracted) {
+          tc = [{ id: "manual_tool_call_0", type: "function", function: extracted }];
+          buf = "";
+        }
+      }
+
+      return { toolCalls: tc, contentBuffer: buf };
     }
 
-    // llama3.1-8b sometimes outputs tool calls as content text instead of
-    // the structured tool_calls field. Detect and parse both formats.
-    if (toolCalls.length === 0 && contentBuffer) {
-      const extracted = tryExtractToolCallFromContent(contentBuffer);
-      if (extracted) {
-        toolCalls = [{
-          id: "manual_tool_call_0",
-          type: "function",
-          function: extracted,
-        }];
-        contentBuffer = "";
-      }
+    // Retry once if model returns empty (llama3.1-8b intermittently returns nothing)
+    let { toolCalls, contentBuffer } = await streamAndParse();
+    if (toolCalls.length === 0 && !contentBuffer.trim()) {
+      console.log("[Stream] Empty response from model, retrying once...");
+      ({ toolCalls, contentBuffer } = await streamAndParse());
     }
+
+    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
 
     if (toolCalls.length === 0) {
       if (contentBuffer) {
