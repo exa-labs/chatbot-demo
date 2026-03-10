@@ -394,7 +394,7 @@ function LatencyBar({ latency, side }) {
 
   if (side === "left") {
     return (
-      <div className="flex items-center gap-2 px-4 py-2 bg-[#faf9f8] border-t border-[#e5e5e5] shrink-0">
+      <div className="flex items-center gap-2 px-4 h-10 bg-[#faf9f8] border-t border-[#e5e5e5] shrink-0">
         <img src={cerebrasLogo} alt="" className="h-3.5 w-3.5" />
         <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
           Responded in <span className="text-[#0040f0] font-semibold">{latency.totalMs.toLocaleString()}ms</span>
@@ -404,7 +404,7 @@ function LatencyBar({ latency, side }) {
   }
 
   return (
-    <div className="flex items-center gap-3 px-4 py-2 bg-[#faf9f8] border-t border-[#e5e5e5] shrink-0 flex-wrap">
+    <div className="flex items-center gap-3 px-4 h-10 bg-[#faf9f8] border-t border-[#e5e5e5] shrink-0">
       <div className="flex items-center gap-1.5">
         <img src={exaLogomarkBlue} alt="" className="h-3.5 w-3.5" />
         <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
