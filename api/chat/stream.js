@@ -326,8 +326,30 @@ export default async function handler(req, res) {
 
       const choice = response.choices[0];
 
-      if (!choice.message.tool_calls) {
-        // No tool calls — stream the content to the client
+      // llama3.1-8b sometimes outputs tool calls as content text instead of
+      // using the structured tool_calls field. Detect and parse this case.
+      let parsedToolCalls = choice.message.tool_calls;
+      if (!parsedToolCalls && choice.message.content) {
+        const content = choice.message.content.trim();
+        if (content.startsWith("{") && content.includes('"name"') && content.includes('"arguments"')) {
+          try {
+            const parsed = JSON.parse(content);
+            if (parsed.name && parsed.arguments) {
+              parsedToolCalls = [{
+                id: "manual_tool_call_0",
+                type: "function",
+                function: {
+                  name: parsed.name,
+                  arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
+                },
+              }];
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!parsedToolCalls) {
+        // No tool calls — send the content to the client
         const content = choice.message.content;
         if (content) {
           sendEvent("content", { content });
@@ -336,8 +358,10 @@ export default async function handler(req, res) {
         return res.end();
       }
 
-      var toolCalls = choice.message.tool_calls;
-      var assistantMessage = choice.message;
+      var toolCalls = parsedToolCalls;
+      var assistantMessage = parsedToolCalls === choice.message.tool_calls
+        ? choice.message
+        : { role: "assistant", content: null, tool_calls: parsedToolCalls };
     } else {
       // No tools — stream directly for fast response
       const stream = await client.chat.completions.create({

@@ -104,7 +104,29 @@ app.post("/api/chat/stream", async (req, res) => {
 
       const choice = response.choices[0];
 
-      if (!choice.message.tool_calls) {
+      // llama3.1-8b sometimes outputs tool calls as content text instead of
+      // using the structured tool_calls field. Detect and parse this case.
+      let parsedToolCalls = choice.message.tool_calls;
+      if (!parsedToolCalls && choice.message.content) {
+        const content = choice.message.content.trim();
+        if (content.startsWith("{") && content.includes('"name"') && content.includes('"arguments"')) {
+          try {
+            const parsed = JSON.parse(content);
+            if (parsed.name && parsed.arguments) {
+              parsedToolCalls = [{
+                id: "manual_tool_call_0",
+                type: "function",
+                function: {
+                  name: parsed.name,
+                  arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
+                },
+              }];
+            }
+          } catch (_) {}
+        }
+      }
+
+      if (!parsedToolCalls) {
         const content = choice.message.content;
         if (content) {
           sendEvent("content", { content });
@@ -113,8 +135,10 @@ app.post("/api/chat/stream", async (req, res) => {
         return res.end();
       }
 
-      var toolCalls = choice.message.tool_calls;
-      var assistantMessage = choice.message;
+      var toolCalls = parsedToolCalls;
+      var assistantMessage = parsedToolCalls === choice.message.tool_calls
+        ? choice.message
+        : { role: "assistant", content: null, tool_calls: parsedToolCalls };
     } else {
       const stream = await client.chat.completions.create({
         model,
@@ -275,14 +299,38 @@ app.post("/api/chat", async (req, res) => {
 
     const choice = response.choices[0];
 
-    if (!choice.message.tool_calls) {
+    let parsedToolCalls2 = choice.message.tool_calls;
+    if (!parsedToolCalls2 && choice.message.content) {
+      const content = choice.message.content.trim();
+      if (content.startsWith("{") && content.includes('"name"') && content.includes('"arguments"')) {
+        try {
+          const parsed = JSON.parse(content);
+          if (parsed.name && parsed.arguments) {
+            parsedToolCalls2 = [{
+              id: "manual_tool_call_0",
+              type: "function",
+              function: {
+                name: parsed.name,
+                arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
+              },
+            }];
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!parsedToolCalls2) {
       return res.json({ content: choice.message.content, searches: null, exaUsed: false });
     }
+
+    const assistantMessage2 = parsedToolCalls2 === choice.message.tool_calls
+      ? choice.message
+      : { role: "assistant", content: null, tool_calls: parsedToolCalls2 };
 
     // Collect searches with defensive parsing
     const allSearches = [];
     const toolCallIds = [];
-    for (const toolCall of choice.message.tool_calls) {
+    for (const toolCall of parsedToolCalls2) {
       try {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
@@ -344,7 +392,7 @@ app.post("/api/chat", async (req, res) => {
       model,
       messages: [
         ...messages,
-        choice.message,
+        assistantMessage2,
         ...toolMessages,
       ],
     });

@@ -226,13 +226,39 @@ export default async function handler(req, res) {
 
     const choice = response.choices[0];
 
-    if (!choice.message.tool_calls) {
+    // llama3.1-8b sometimes outputs tool calls as content text instead of
+    // using the structured tool_calls field. Detect and parse this case.
+    let parsedToolCalls = choice.message.tool_calls;
+    if (!parsedToolCalls && choice.message.content) {
+      const content = choice.message.content.trim();
+      if (content.startsWith("{") && content.includes('"name"') && content.includes('"arguments"')) {
+        try {
+          const parsed = JSON.parse(content);
+          if (parsed.name && parsed.arguments) {
+            parsedToolCalls = [{
+              id: "manual_tool_call_0",
+              type: "function",
+              function: {
+                name: parsed.name,
+                arguments: typeof parsed.arguments === 'string' ? parsed.arguments : JSON.stringify(parsed.arguments),
+              },
+            }];
+          }
+        } catch (_) {}
+      }
+    }
+
+    if (!parsedToolCalls) {
       return res.json({ content: choice.message.content, searches: null, exaUsed: false });
     }
 
+    const assistantMessage = parsedToolCalls === choice.message.tool_calls
+      ? choice.message
+      : { role: "assistant", content: null, tool_calls: parsedToolCalls };
+
     const allSearches = [];
     const toolCallIds = [];
-    for (const toolCall of choice.message.tool_calls) {
+    for (const toolCall of parsedToolCalls) {
       try {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
@@ -294,7 +320,7 @@ export default async function handler(req, res) {
       model,
       messages: [
         ...messages,
-        choice.message,
+        assistantMessage,
         ...toolMessages,
       ],
     });
