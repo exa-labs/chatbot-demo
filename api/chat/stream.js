@@ -121,11 +121,7 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5, search
     searchParams.category = category;
   }
 
-  if (!category || !noDateFilterCategories.has(category)) {
-    const defaultMaxAge = category ? (freshnessDefaults[category] || freshnessDefaults.default) : freshnessDefaults.default;
-    const maxAgeHours = maxAgeOverride && maxAgeOverride < defaultMaxAge ? maxAgeOverride : defaultMaxAge;
-    searchParams.startPublishedDate = getStartDate(maxAgeHours);
-  }
+  // No startPublishedDate filter — the query itself includes the year for freshness
 
   const response = await exa.searchAndContents(query, searchParams);
 
