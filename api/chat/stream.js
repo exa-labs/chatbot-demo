@@ -507,17 +507,36 @@ export default async function handler(req, res) {
         }
         const items = results.map((r) => {
           const date = r.publishedDate ? ` | ${r.publishedDate.slice(0, 10)}` : "";
-          return `- ${r.title}${date}\n  ${r.url}\n  ${r.text?.slice(0, 600) || ""}`;
+          return `- ${r.title}${date}\n  ${r.url}\n  ${r.text?.slice(0, 2000) || ""}`;
         }).join("\n");
         return `[${query}${category ? ` (${category})` : ""}]\n${items}`;
       })
       .join("\n\n");
 
     // Step 3: Cerebras generates the final response with search results as context
+    const currentDate = new Date().toLocaleDateString('en-US', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+    const summarizePrompt = `You are a helpful assistant. Today's date is ${currentDate}.
+You will receive web search results and must use them to answer the user's question.
+
+Rules:
+- Use ONLY the information from the search results provided. Do not make up facts.
+- When sources conflict, prefer the MOST RECENTLY published source (check the dates).
+- Be direct and confident. Start with the answer, not preamble.
+- Cite sources naturally in your response.
+- Use clear formatting with bullet points or numbered lists when helpful.
+- Do NOT include charts unless the user explicitly asks for them.
+
+FOLLOW-UP SUGGESTIONS - Always include at the very end of your response:
+\`\`\`followups
+["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?"]
+\`\`\``;
+
     const exaMessages = [
-      { role: "system", content: getSystemPrompt(true) },
+      { role: "system", content: summarizePrompt },
       ...recentHistory,
-      { role: "user", content: `${message}\n\n---\nWEB SEARCH RESULTS:\n${resultsText}\n---\nUse the search results above to answer the user's question. Cite specific sources when possible.` },
+      { role: "user", content: `${message}\n\n---\nWEB SEARCH RESULTS (today is ${currentDate}, prefer most recent sources):\n${resultsText}\n---\nAnswer the question using the search results above. When sources disagree, trust the most recently dated source.` },
     ];
 
     const finalCallStart = Date.now();
