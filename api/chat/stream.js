@@ -26,7 +26,7 @@ async function withRetry(fn, maxRetries = 3) {
   }
 }
 
-const DEFAULT_MODEL = "gpt-oss-120b";
+const DEFAULT_MODEL = "llama3.1-8b";
 
 /**
  * Attempt to parse a tool call from content text that the model output
@@ -418,135 +418,17 @@ export default async function handler(req, res) {
       return res.end();
     }
 
-    // Helper: stream a completion and extract tool calls + content
-    async function streamAndParse() {
-      const s = await withRetry(() => client.chat.completions.create({
-        model,
-        messages,
-        tools: exaEnabled ? [getSearchTool()] : undefined,
-        stream: true,
-      }));
-
-      let tc = [];
-      let buf = "";
-
-      for await (const chunk of s) {
-        const delta = chunk.choices[0]?.delta;
-        if (delta?.content) buf += delta.content;
-        if (delta?.tool_calls) {
-          for (const call of delta.tool_calls) {
-            const idx = call.index;
-            if (!tc[idx]) tc[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
-            if (call.id) tc[idx].id = call.id;
-            if (call.function?.name) tc[idx].function.name = call.function.name;
-            if (call.function?.arguments) tc[idx].function.arguments += call.function.arguments;
-          }
-        }
-      }
-
-      // Detect tool calls output as content text
-      if (tc.length === 0 && buf) {
-        const extracted = tryExtractToolCallFromContent(buf);
-        if (extracted) {
-          tc = [{ id: "manual_tool_call_0", type: "function", function: extracted }];
-          buf = "";
-        }
-      }
-
-      return { toolCalls: tc, contentBuffer: buf };
-    }
-
-    // Retry once if model returns empty (llama3.1-8b intermittently returns nothing)
-    const initialCallStart = Date.now();
-    let { toolCalls, contentBuffer } = await streamAndParse();
-    if (toolCalls.length === 0 && !contentBuffer.trim()) {
-      console.log("[Stream] Empty response from model, retrying once...");
-      ({ toolCalls, contentBuffer } = await streamAndParse());
-    }
-    const initialCallMs = Date.now() - initialCallStart;
-
-    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
-
-    // If content looks like an undetected tool call, retry once
-    if (toolCalls.length === 0 && contentBuffer && contentBuffer.includes("web_search")) {
-      console.log("[Stream] Content looks like undetected tool call, retrying...");
-      ({ toolCalls, contentBuffer } = await streamAndParse());
-    }
-
-    if (toolCalls.length === 0) {
-      // Safety net: suppress raw tool-call-shaped JSON from reaching the client
-      if (contentBuffer && contentBuffer.trim().startsWith("{") && contentBuffer.includes("web_search")) {
-        console.log("[Stream] Suppressing leaked tool call JSON");
-        sendEvent("content", { content: "I encountered an issue processing your request. Please try again." });
-      } else if (contentBuffer) {
-        sendEvent("content", { content: contentBuffer });
-      }
-      sendEvent("done", { exaUsed: false });
-      return res.end();
-    }
-
-    assistantMessage.content = contentBuffer || null;
-    assistantMessage.tool_calls = toolCalls;
-
-    const allSearches = [];
-    const toolCallIds = [];
-    for (const toolCall of toolCalls) {
-      try {
-        const args = JSON.parse(toolCall.function.arguments);
-        let searches = args.searches;
-
-        if (typeof searches === 'string') {
-          try { searches = JSON.parse(searches); } catch (_) {
-            // Fallback: Python-style dict with single quotes
-            try { searches = JSON.parse(searches.replace(/'/g, '"')); } catch (_2) {
-              // Last resort: regex extract queries from the string
-              const qr = /["']query["']\s*:\s*["']([^"']+)["']/g;
-              let qm; const qMatches = [];
-              while ((qm = qr.exec(searches)) !== null) {
-                qMatches.push({ query: qm[1].trim(), numResults: 5 });
-              }
-              if (qMatches.length > 0) searches = qMatches;
-            }
-          }
-        }
-
-        if (searches && !Array.isArray(searches)) {
-          searches = [searches];
-        }
-
-        if (!searches && args.query) {
-          searches = [{ query: args.query, numResults: args.numResults }];
-        }
-
-        if (Array.isArray(searches)) {
-          const normalized = searches.map(s => {
-            if (typeof s === 'string' && s.trim()) return { query: s.trim() };
-            if (s && typeof s.query === 'string' && s.query.trim()) return s;
-            return null;
-          }).filter(Boolean);
-          allSearches.push(...normalized);
-        }
-        toolCallIds.push(toolCall.id);
-      } catch (e) {
-        console.error("Failed to parse tool call arguments:", e.message);
-        toolCallIds.push(toolCall.id);
-      }
-    }
-
-    if (allSearches.length === 0) {
-      console.log("No valid searches extracted from tool calls");
-      sendEvent("done", { exaUsed: false });
-      return res.end();
-    }
+    // Direct Exa path: skip LLM tool-call detection, search immediately with user query
+    // This cuts Cerebras API calls from 3-4 to just 1 on the Exa side
+    const allSearches = [{ query: message, numResults: 5 }];
 
     sendEvent("search_start", { queries: allSearches.map(s => s.query) });
 
-    console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 5} results)`).join(", ")}`);
+    console.log(`Searching: ${allSearches.map(s => `${s.query} (${s.numResults || 5} results)`).join(", ")}`);
     const searchStart = Date.now();
     const searchResults = await searchMultiple(allSearches, searchType);
     const searchTimeMs = Date.now() - searchStart;
     const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
-    // Use Exa's server-side processing time (like the instant extension does) for more accurate latency
     const exaServerTimeMs = searchResults.reduce((best, s) => Math.max(best, s.exaServerTimeMs || 0), 0) || null;
     console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms (server: ${exaServerTimeMs}ms)`);
 
@@ -580,20 +462,17 @@ export default async function handler(req, res) {
       })
       .join("\n\n");
 
-    const toolMessages = toolCallIds.map(id => ({
-      role: "tool",
-      tool_call_id: id,
-      content: resultsText,
-    }));
+    // Build messages with search results injected as system context (no tool calls needed)
+    const exaMessages = [
+      { role: "system", content: getSystemPrompt(true) },
+      ...recentHistory,
+      { role: "user", content: `${message}\n\n---\nWEB SEARCH RESULTS:\n${resultsText}\n---\nUse the search results above to answer the user's question. Cite specific sources when possible.` },
+    ];
 
     const finalCallStart = Date.now();
     const finalStream = await withRetry(() => client.chat.completions.create({
       model,
-      messages: [
-        ...messages,
-        assistantMessage,
-        ...toolMessages,
-      ],
+      messages: exaMessages,
       stream: true,
     }));
 
@@ -603,24 +482,13 @@ export default async function handler(req, res) {
       const content = chunk.choices[0]?.delta?.content;
       if (content) fullFinal += content;
     }
-    // Strip leading JSON blobs (tool call echo), "assistant" prefix, and trailing artifacts
-    let trimmed = fullFinal.trimStart();
-    if (trimmed.startsWith("{")) {
-      // Skip over leading JSON blob
-      const lastBrace = trimmed.lastIndexOf("}");
-      if (lastBrace >= 0 && lastBrace < trimmed.length - 1) {
-        trimmed = trimmed.slice(lastBrace + 1);
-      } else {
-        trimmed = ""; // entire response is JSON — suppress it
-      }
-    }
-    const cleanedFinal = stripLeakedArtifacts(trimmed.trimStart());
+    const cleanedFinal = stripLeakedArtifacts(fullFinal.trimStart());
     if (cleanedFinal) {
       sendEvent("content", { content: cleanedFinal });
     }
 
     const finalCallMs = Date.now() - finalCallStart;
-    sendEvent("done", { exaUsed: true, searchTimeMs, exaServerTimeMs, totalSources, initialCallMs, finalCallMs });
+    sendEvent("done", { exaUsed: true, searchTimeMs, exaServerTimeMs, totalSources, initialCallMs: 0, finalCallMs });
     res.end();
 
   } catch (err) {
