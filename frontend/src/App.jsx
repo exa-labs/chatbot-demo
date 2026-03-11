@@ -170,7 +170,7 @@ async function streamPane({ message, history, exaEnabled, exaMode, assistantId, 
 
 function App() {
   const [hasStarted, setHasStarted] = useState(false);
-  const [exaMode, setExaMode] = useState("auto");
+  const [exaMode, setExaMode] = useState("instant");
 
   // Left pane (without Exa)
   const [leftMessages, setLeftMessages] = useState([]);
@@ -248,11 +248,14 @@ function App() {
     return (
       <div className="flex flex-col min-h-screen bg-white">
         <header className="px-6 py-4 border-b border-[#e5e5e5]">
-          <div className="flex items-center gap-3">
-            <img src={exaLogomarkBlue} alt="Exa" className="h-6 w-6" />
-            <h1 className="text-xl font-semibold text-[#000911]">Exa Chatbot Demo</h1>
-            <span className="text-sm text-[#60646c]">Powered by Cerebras inference</span>
-            <img src={cerebrasLogo} alt="Cerebras" className="h-4 w-4" />
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <img src={exaLogomarkBlue} alt="Exa" className="h-6 w-6" />
+              <h1 className="text-xl font-semibold text-[#000911]">Exa Chatbot Demo</h1>
+              <span className="text-sm text-[#60646c]">Powered by Cerebras inference</span>
+              <img src={cerebrasLogo} alt="Cerebras" className="h-4 w-4" />
+            </div>
+            <ModeDropdown mode={exaMode} onChange={setExaMode} disabled={false} />
           </div>
           <p className="text-sm text-[#9ca3af] mt-1">Model: llama3.1-8b &middot; Side-by-side comparison: with and without Exa search</p>
         </header>
@@ -314,6 +317,7 @@ function App() {
                   setRightMessages([]);
                   setLeftLatency(null);
                   setRightLatency(null);
+                  setExaMode("instant");
                 }}
                 disabled={leftLoading || rightLoading}
                 className={`p-1.5 rounded-lg border border-[#e5e5e5] bg-white text-[#60646c] transition-all hover:border-[#0040f0] hover:text-[#0040f0] ${
