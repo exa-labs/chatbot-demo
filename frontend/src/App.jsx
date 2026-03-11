@@ -37,7 +37,7 @@ const SEARCH_NUDGES = [
   },
   {
     title: "Super Bowl",
-    prompt: "Who won the Super Bowl and who was the MVP?"
+    prompt: "Who won the Super Bowl?"
   }
 ];
 
