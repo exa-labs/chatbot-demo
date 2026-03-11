@@ -170,7 +170,7 @@ async function streamPane({ message, history, exaEnabled, exaMode, assistantId, 
 
 function App() {
   const [hasStarted, setHasStarted] = useState(false);
-  const [exaMode, setExaMode] = useState("fast");
+  const [exaMode, setExaMode] = useState("auto");
 
   // Left pane (without Exa)
   const [leftMessages, setLeftMessages] = useState([]);
