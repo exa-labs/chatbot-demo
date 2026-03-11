@@ -2,13 +2,70 @@ import OpenAI from "openai";
 import Exa from "exa-js";
 
 const client = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPEN_ROUTER_KEY,
+  baseURL: "https://api.cerebras.ai/v1",
+  apiKey: process.env.CEREBRAS_API_KEY || "csk-ctnvpnrpxw5t244c83c84pdecwk9tpfdp3jkvece9kve248x",
 });
 
 const exa = new Exa(process.env.EXA_API_KEY);
 
-const DEFAULT_MODEL = "google/gemini-2.5-flash";
+const DEFAULT_MODEL = "llama3.1-8b";
+
+/**
+ * Attempt to parse a tool call from content text that the model output
+ * instead of using the structured tool_calls field.
+ * Handles multiple malformed JSON formats from llama3.1-8b.
+ * Returns { name, arguments } or null.
+ */
+function tryExtractToolCallFromContent(content) {
+  const trimmed = content.trim();
+
+  // Find the first '{' - model may prefix with "assistant", role text, etc.
+  const jsonStart = trimmed.indexOf("{");
+  if (jsonStart === -1) return null;
+  const jsonCandidate = trimmed.slice(jsonStart);
+
+  // Try 1: Direct JSON.parse
+  try {
+    const parsed = JSON.parse(jsonCandidate);
+    let name = parsed.name;
+    let args = parsed.arguments || parsed.parameters;
+    if (!name && parsed.function) {
+      name = parsed.function.name;
+      args = parsed.function.arguments || parsed.function.parameters;
+    }
+    if (name && args) {
+      return {
+        name,
+        arguments: typeof args === 'string' ? args : JSON.stringify(args),
+      };
+    }
+  } catch (_) {}
+
+  // Try 2: Regex extraction for malformed JSON (unescaped inner quotes, single quotes, etc.)
+  const nameMatch = jsonCandidate.match(/["']?name["']?\s*:\s*["']([^"']+)["']/);
+  if (!nameMatch) return null;
+  const name = nameMatch[1];
+  if (name !== "web_search") return null;
+
+  const queries = [];
+  // Match query values with both double and single quotes
+  const queryRegex = /["']?query["']?\s*:\s*["']((?:[^"'\\]|\\.)*)["']/g;
+  let match;
+  while ((match = queryRegex.exec(jsonCandidate)) !== null) {
+    const q = match[1].replace(/\\["']/g, m => m[1]).replace(/\\\\/g, '\\');
+    if (q.trim()) queries.push(q.trim());
+  }
+
+  if (queries.length > 0) {
+    const searches = queries.map(q => ({ query: q, numResults: 5 }));
+    return {
+      name,
+      arguments: JSON.stringify({ searches }),
+    };
+  }
+
+  return null;
+}
 
 const freshnessDefaults = {
   tweet: 48,
@@ -206,9 +263,12 @@ export default async function handler(req, res) {
   try {
     const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
 
-    const recentHistory = history.slice(-20).map(msg => ({
+    // Truncate assistant messages to avoid overwhelming the 8B model with long context
+    const recentHistory = history.slice(-10).map(msg => ({
       role: msg.role,
-      content: msg.content,
+      content: msg.role === 'assistant' && msg.content && msg.content.length > 500
+        ? msg.content.slice(0, 500) + '...'
+        : msg.content,
     }));
 
     const messages = [
@@ -217,24 +277,61 @@ export default async function handler(req, res) {
       { role: "user", content: message },
     ];
 
-    const response = await client.chat.completions.create({
-      model,
-      messages,
-      tools: exaEnabled ? [getSearchTool()] : undefined,
-    });
+    // Helper: call model and detect tool calls
+    async function callAndParse() {
+      const resp = await client.chat.completions.create({
+        model,
+        messages,
+        tools: exaEnabled ? [getSearchTool()] : undefined,
+      });
 
-    const choice = response.choices[0];
+      const ch = resp.choices[0];
+      let tcList = ch.message.tool_calls;
+      let msg = ch.message;
 
-    if (!choice.message.tool_calls) {
-      return res.json({ content: choice.message.content, searches: null, exaUsed: false });
+      if (!tcList && ch.message.content) {
+        const extracted = tryExtractToolCallFromContent(ch.message.content);
+        if (extracted) {
+          tcList = [{ id: "manual_tool_call_0", type: "function", function: extracted }];
+          msg = { role: "assistant", content: null, tool_calls: tcList };
+        }
+      }
+
+      return { toolCallsList: tcList, assistantMessage: msg, content: ch.message.content };
+    }
+
+    // Retry once if model returns empty (llama3.1-8b intermittently returns nothing)
+    let { toolCallsList, assistantMessage, content } = await callAndParse();
+    if (!toolCallsList && (!content || !content.trim())) {
+      console.log("[Chat] Empty response from model, retrying once...");
+      ({ toolCallsList, assistantMessage, content } = await callAndParse());
+    }
+
+    if (!toolCallsList) {
+      return res.json({ content: content, searches: null, exaUsed: false });
     }
 
     const allSearches = [];
     const toolCallIds = [];
-    for (const toolCall of choice.message.tool_calls) {
+    for (const toolCall of toolCallsList) {
       try {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
+
+        if (typeof searches === 'string') {
+          try { searches = JSON.parse(searches); } catch (_) {
+            // Fallback: Python-style dict with single quotes
+            try { searches = JSON.parse(searches.replace(/'/g, '"')); } catch (_2) {
+              // Last resort: regex extract queries from the string
+              const qr = /["']query["']\s*:\s*["']([^"']+)["']/g;
+              let qm; const qMatches = [];
+              while ((qm = qr.exec(searches)) !== null) {
+                qMatches.push({ query: qm[1].trim(), numResults: 5 });
+              }
+              if (qMatches.length > 0) searches = qMatches;
+            }
+          }
+        }
 
         if (searches && !Array.isArray(searches)) {
           searches = [searches];
@@ -244,8 +341,12 @@ export default async function handler(req, res) {
         }
 
         if (Array.isArray(searches)) {
-          const validSearches = searches.filter(s => s && typeof s.query === 'string' && s.query.trim());
-          allSearches.push(...validSearches);
+          const normalized = searches.map(s => {
+            if (typeof s === 'string' && s.trim()) return { query: s.trim() };
+            if (s && typeof s.query === 'string' && s.query.trim()) return s;
+            return null;
+          }).filter(Boolean);
+          allSearches.push(...normalized);
         }
         toolCallIds.push(toolCall.id);
       } catch (e) {
@@ -288,13 +389,22 @@ export default async function handler(req, res) {
       model,
       messages: [
         ...messages,
-        choice.message,
+        assistantMessage,
         ...toolMessages,
       ],
     });
 
+    let finalContent = finalResponse.choices[0].message.content || "";
+    const trimmedFinal = finalContent.trimStart();
+    if (trimmedFinal.startsWith("{") && trimmedFinal.includes("}")) {
+      const afterJson = trimmedFinal.slice(trimmedFinal.lastIndexOf("}") + 1);
+      finalContent = afterJson.replace(/^\s*assistant\s*/i, "").trim();
+    } else {
+      finalContent = trimmedFinal.replace(/^\s*assistant\s*/i, "").trimStart();
+    }
+
     res.json({
-      content: finalResponse.choices[0].message.content,
+      content: finalContent,
       searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,

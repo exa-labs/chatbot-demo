@@ -1,14 +1,99 @@
 import OpenAI from "openai";
 import Exa from "exa-js";
 
-const client = new OpenAI({
+// Cerebras client for fast final response generation
+const cerebrasClient = new OpenAI({
+  baseURL: "https://api.cerebras.ai/v1",
+  apiKey: process.env.CEREBRAS_API_KEY || "csk-ctnvpnrpxw5t244c83c84pdecwk9tpfdp3jkvece9kve248x",
+});
+
+// OpenRouter client for fast tool call / query generation
+const routerClient = new OpenAI({
   baseURL: "https://openrouter.ai/api/v1",
   apiKey: process.env.OPEN_ROUTER_KEY,
 });
 
+const ROUTER_MODEL = "google/gemini-2.5-flash";
+
 const exa = new Exa(process.env.EXA_API_KEY);
 
-const DEFAULT_MODEL = "google/gemini-2.5-flash";
+// Retry wrapper for Cerebras API calls (handles 429 rate limits)
+async function withRetry(fn, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const is429 = err?.status === 429 || err?.statusCode === 429 || (err?.message && err.message.includes('429'));
+      if (is429 && attempt < maxRetries) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
+        console.log(`[Stream] 429 rate limit hit, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+const DEFAULT_MODEL = "llama3.1-8b";
+
+/**
+ * Attempt to parse a tool call from content text that the model output
+ * instead of using the structured tool_calls field.
+ * Handles multiple malformed JSON formats from llama3.1-8b.
+ * Returns { name, arguments } or null.
+ */
+function tryExtractToolCallFromContent(content) {
+  const trimmed = content.trim();
+
+  // Find the first '{' - model may prefix with "assistant", role text, etc.
+  const jsonStart = trimmed.indexOf("{");
+  if (jsonStart === -1) return null;
+  const jsonCandidate = trimmed.slice(jsonStart);
+
+  // Try 1: Direct JSON.parse
+  try {
+    const parsed = JSON.parse(jsonCandidate);
+    let name = parsed.name;
+    let args = parsed.arguments || parsed.parameters;
+    // Handle {"type": "function", "function": {"name": ..., "arguments": ...}} format
+    if (!name && parsed.function) {
+      name = parsed.function.name;
+      args = parsed.function.arguments || parsed.function.parameters;
+    }
+    if (name && args) {
+      return {
+        name,
+        arguments: typeof args === 'string' ? args : JSON.stringify(args),
+      };
+    }
+  } catch (_) {}
+
+  // Try 2: Regex extraction for malformed JSON (unescaped inner quotes, single quotes, etc.)
+  const nameMatch = jsonCandidate.match(/["']?name["']?\s*:\s*["']([^"']+)["']/);
+  if (!nameMatch) return null;
+  const name = nameMatch[1];
+  if (name !== "web_search") return null;
+
+  const queries = [];
+  // Match query values with both double and single quotes
+  const queryRegex = /["']?query["']?\s*:\s*["']((?:[^"'\\]|\\.)*)["']/g;
+  let match;
+  while ((match = queryRegex.exec(jsonCandidate)) !== null) {
+    const q = match[1].replace(/\\["']/g, m => m[1]).replace(/\\\\/g, '\\');
+    if (q.trim()) queries.push(q.trim());
+  }
+
+  if (queries.length > 0) {
+    const searches = queries.map(q => ({ query: q, numResults: 5 }));
+    return {
+      name,
+      arguments: JSON.stringify({ searches }),
+    };
+  }
+
+  return null;
+}
 
 const freshnessDefaults = {
   tweet: 48,
@@ -23,47 +108,49 @@ function getStartDate(maxAgeHours) {
   return date.toISOString();
 }
 
-async function searchExa(query, category, maxAgeOverride, numResults = 5) {
+async function searchExa(query, category, maxAgeOverride, numResults = 5, searchType = "instant") {
   const searchParams = {
     numResults: Math.min(50, Math.max(3, numResults)),
     highlights: {
       maxCharacters: 4000,
     },
-    type: "auto",
+    type: searchType,
   };
 
   if (category) {
     searchParams.category = category;
   }
 
-  if (!category || !noDateFilterCategories.has(category)) {
-    const defaultMaxAge = category ? (freshnessDefaults[category] || freshnessDefaults.default) : freshnessDefaults.default;
-    const maxAgeHours = maxAgeOverride && maxAgeOverride < defaultMaxAge ? maxAgeOverride : defaultMaxAge;
-    searchParams.startPublishedDate = getStartDate(maxAgeHours);
-  }
+  // No startPublishedDate filter — the query itself includes the year for freshness
 
   const response = await exa.searchAndContents(query, searchParams);
 
+  // Exa API returns requestTime (seconds) — convert to ms for latency display
+  const exaServerTimeMs = response.requestTime ? Math.round(response.requestTime * 1000) : null;
+
   if (!response.results || response.results.length === 0) {
-    return [];
+    return { results: [], exaServerTimeMs };
   }
 
-  return response.results.map((r) => ({
-    title: r.title,
-    url: r.url,
-    text: (r.highlights || []).join("\n").slice(0, 4000),
-    publishedDate: r.publishedDate,
-    author: r.author,
-  }));
+  return {
+    results: response.results.map((r) => ({
+      title: r.title,
+      url: r.url,
+      text: (r.highlights || []).join("\n").slice(0, 4000),
+      publishedDate: r.publishedDate,
+      author: r.author,
+    })),
+    exaServerTimeMs,
+  };
 }
 
-async function searchMultiple(searches) {
+async function searchMultiple(searches, searchType = "instant") {
   const searchPromises = searches.map(async ({ query, category, maxAgeOverride, numResults = 5 }) => {
     const startTime = Date.now();
     try {
-      const results = await searchExa(query, category, maxAgeOverride, numResults);
+      const { results, exaServerTimeMs } = await searchExa(query, category, maxAgeOverride, numResults, searchType);
       const timeMs = Date.now() - startTime;
-      return { query, category, results, timeMs };
+      return { query, category, results, timeMs, exaServerTimeMs };
     } catch (err) {
       const timeMs = Date.now() - startTime;
       return { query, category, results: [], error: err.message, timeMs };
@@ -162,14 +249,16 @@ When the user uses referential language, expand it:
 - "similar offerings" -> include the domain/category from context
 - "more about this" -> include the specific subject
 
-CATEGORIES - Use sparingly. Most queries should NOT use a category:
+CATEGORIES - RARELY use categories. Most queries should NOT use a category:
 - company: ONLY for "what does X company do" or company research
-- people: ONLY for biographical profiles of NON-PUBLIC figures (e.g., finding a specific professional's LinkedIn).
-  NEVER use "people" for public figures you already know (Elon Musk, Sam Altman, Ilya Sutskever, etc.)
-  NEVER use "people" for quotes, interviews, statements, news, or podcasts about/by someone
+- people: ALMOST NEVER USE THIS. Only for finding a specific non-public professional's LinkedIn profile.
+  NEVER use "people" for public figures, politicians, celebrities, executives, or anyone you already know about.
+  NEVER use "people" for quotes, interviews, statements, news, actions, policies, or podcasts about/by someone.
+  NEVER use "people" for questions about what someone did, said, or is doing — use a general search instead.
+  If you DO use "people" category, you MUST ALSO include a second search for the same query WITHOUT the people category.
 - research_paper: ONLY for academic papers or arxiv
 
-For everything else (news, sports, general questions, quotes from people, what someone said), DO NOT use a category. Exa's general search works best for most queries.
+For everything else (news, sports, general questions, people in the news, quotes, what someone said, politicians, leaders), DO NOT use a category. Exa's general search works best for most queries — including queries about people.
 
 RESPONSE STYLE - MATCH THE USER'S REQUEST:
 - "Tell me everything about X" -> Give a COMPREHENSIVE deep-dive with all available information
@@ -211,28 +300,13 @@ WITH SEARCH: [What the current data shows]
 
 Only include this callout when there's a meaningful difference.
 
-CHARTS - When data is numeric and comparative, include a chart block:
-Use charts for: stock prices, rankings, comparisons, statistics, polls, market share, trends over time.
-Do NOT use charts for: general news, explanations, single facts, non-numeric info.
-
-Format (place AFTER your prose response):
+CHARTS - Only include charts when the user EXPLICITLY asks for visual data, graphs, or charts.
+Do NOT proactively generate charts. Focus on clear, well-written prose responses.
+If the user asks for a chart, use this format (place AFTER your prose response):
 \`\`\`chart
 {"type":"bar","title":"Chart Title","labels":["A","B","C"],"data":[10,20,30]}
 \`\`\`
-
 Types: "bar", "line", "pie", "doughnut"
-- bar/line: for comparisons, rankings, trends
-- pie/doughnut: for market share, distributions (parts of whole)
-
-CHART BEST PRACTICES:
-- Use descriptive, compelling titles (not just "Data" - say "NFL Coach of the Year Odds" or "Market Share by Company")
-- Keep labels SHORT (abbreviate if needed: "Minnesota" -> "MIN", "Microsoft" -> "MSFT")
-- Order data meaningfully: rank by value (highest to lowest) or chronologically for trends
-- For percentages, ensure they add to 100 for pie/doughnut
-- Round numbers for cleaner display (89.7% -> 90%, $1,234,567 -> $1.2M)
-- Limit to 5-8 data points max for readability - combine smaller values into "Other" if needed
-- For line charts showing trends, use consistent time intervals
-- Be thoughtful about scale - the graph needs to show change over time and thus you must pick time range and axis scaling that is appropriate for good visualization
 `;
 };
 
@@ -251,12 +325,12 @@ RESULT COUNT - Choose based on query complexity:
 - Normal query (news, what someone said, general info): numResults = 5
 - Complex query needing depth (research, comparisons, comprehensive analysis): use multiple searches with numResults = 5 each
 
-CATEGORIES - Use sparingly:
+CATEGORIES - RARELY use categories. Default to NO category:
 - company: ONLY for "what does X company do" or company research
-- people: ONLY for non-public figures (finding someone's LinkedIn). NEVER use for public figures, quotes, interviews, or news about someone
+- people: ALMOST NEVER. Only for finding a non-public professional's LinkedIn. NEVER for public figures, politicians, celebrities, or anyone famous. NEVER for news/quotes/actions about someone. If you use "people", you MUST also include the same query WITHOUT "people" category.
 - research_paper: ONLY for academic papers or arxiv
 
-For news, sports, general facts, current events, quotes, interviews, podcasts - DO NOT use a category.`,
+For news, sports, general facts, current events, quotes, interviews, podcasts, politicians, world leaders, celebrities - DO NOT use a category.`,
       parameters: {
         type: "object",
         properties: {
@@ -293,18 +367,31 @@ export default async function handler(req, res) {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  // Send initial SSE comment to establish data flow and prevent connection stall
+  res.write(":ok\n\n");
+
+  // Heartbeat to keep SSE connection alive during silent buffering phases
+  const heartbeatInterval = setInterval(() => {
+    res.write(":heartbeat\n\n");
+  }, 3000);
 
   const sendEvent = (event, data) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   };
 
   try {
-    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
-    console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}`);
+    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL, exaMode = "instant" } = req.body;
+    const searchType = exaMode === "fast" ? "keyword" : exaMode || "instant";
+    console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}, exaMode: ${exaMode}`);
 
-    const recentHistory = history.slice(-20).map(msg => ({
+    // Truncate assistant messages to avoid overwhelming the 8B model with long context
+    const recentHistory = history.slice(-10).map(msg => ({
       role: msg.role,
-      content: msg.content,
+      content: msg.role === 'assistant' && msg.content && msg.content.length > 500
+        ? msg.content.slice(0, 500) + '...'
+        : msg.content,
     }));
 
     const messages = [
@@ -313,89 +400,103 @@ export default async function handler(req, res) {
       { role: "user", content: message },
     ];
 
-    const stream = await client.chat.completions.create({
-      model,
-      messages,
-      tools: exaEnabled ? [getSearchTool()] : undefined,
-      stream: true,
-    });
-
-    let toolCalls = [];
-    let contentBuffer = "";
-    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
-
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-
-      if (delta?.content) {
-        contentBuffer += delta.content;
-        sendEvent("content", { content: delta.content });
-      }
-
-      if (delta?.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index;
-          if (!toolCalls[idx]) {
-            toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
-          }
-          if (tc.id) toolCalls[idx].id = tc.id;
-          if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
-          if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
-        }
-      }
+    // Strip leaked model artifacts (followups arrays, tool call JSON, "assistant" prefix)
+    function stripLeakedArtifacts(text) {
+      return text
+        .replace(/\n?followups\s*\[.*$/s, "")          // followups [...] at end
+        .replace(/\n?```followups[\s\S]*?```/g, "")    // ```followups ... ```
+        .replace(/\{\s*"name"\s*:\s*"web_search"[\s\S]*$/s, "")  // raw tool call JSON
+        .replace(/^\s*assistant\s*/i, "")              // stray "assistant" prefix
+        .trimEnd();
     }
 
-    if (toolCalls.length === 0) {
-      sendEvent("done", { exaUsed: false });
+    // Fast path: direct streaming for non-Exa requests (Cerebras only)
+    if (!exaEnabled) {
+      const t0 = Date.now();
+      const stream = await withRetry(() => cerebrasClient.chat.completions.create({ model, messages, stream: true }));
+      let fullContent = "";
+      for await (const chunk of stream) {
+        const c = chunk.choices[0]?.delta?.content;
+        if (c) fullContent += c;
+      }
+      const cleaned = stripLeakedArtifacts(fullContent.trimStart());
+      if (cleaned) sendEvent("content", { content: cleaned });
+      sendEvent("done", { exaUsed: false, totalMs: Date.now() - t0 });
       return res.end();
     }
 
-    assistantMessage.content = contentBuffer || null;
-    assistantMessage.tool_calls = toolCalls;
+    // Exa path: Cerebras generates search queries → Exa search → Cerebras summarizes
+    // Step 1: Use Cerebras with our full system prompt + tool definition to generate search queries
+    const queryGenStart = Date.now();
+    console.log(`[Stream] Generating search queries via Cerebras (${model})...`);
+    const toolCallResponse = await withRetry(() => cerebrasClient.chat.completions.create({
+      model,
+      messages,
+      tools: [getSearchTool()],
+    }));
 
+    const toolCallChoice = toolCallResponse.choices[0];
+    const toolCalls = toolCallChoice?.message?.tool_calls || [];
+    const queryGenMs = Date.now() - queryGenStart;
+    console.log(`[Stream] Query generation took ${queryGenMs}ms, got ${toolCalls.length} tool calls`);
+
+    // Extract searches from tool calls
     const allSearches = [];
-    const toolCallIds = [];
     for (const toolCall of toolCalls) {
       try {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
-
-        if (searches && !Array.isArray(searches)) {
-          searches = [searches];
+        if (typeof searches === 'string') {
+          try { searches = JSON.parse(searches); } catch (_) {}
         }
-
-        if (!searches && args.query) {
-          searches = [{ query: args.query, numResults: args.numResults }];
-        }
-
+        if (searches && !Array.isArray(searches)) searches = [searches];
+        if (!searches && args.query) searches = [{ query: args.query, numResults: args.numResults }];
         if (Array.isArray(searches)) {
-          const validSearches = searches.filter(s => s && typeof s.query === 'string' && s.query.trim());
-          allSearches.push(...validSearches);
+          const normalized = searches.map(s => {
+            if (typeof s === 'string' && s.trim()) return { query: s.trim() };
+            if (s && typeof s.query === 'string' && s.query.trim()) return s;
+            return null;
+          }).filter(Boolean);
+          allSearches.push(...normalized);
         }
-        toolCallIds.push(toolCall.id);
       } catch (e) {
         console.error("Failed to parse tool call arguments:", e.message);
-        toolCallIds.push(toolCall.id);
       }
     }
 
-    if (allSearches.length === 0) {
-      console.log("No valid searches extracted from tool calls");
-      sendEvent("done", { exaUsed: false });
-      return res.end();
+    // Fallback: if Cerebras didn't generate tool calls, try to extract from content text
+    if (allSearches.length === 0 && toolCallChoice?.message?.content) {
+      const extracted = tryExtractToolCallFromContent(toolCallChoice.message.content);
+      if (extracted && extracted.name === 'web_search') {
+        try {
+          const args = JSON.parse(extracted.arguments);
+          let searches = args.searches || (args.query ? [{ query: args.query, numResults: args.numResults }] : []);
+          if (typeof searches === 'string') try { searches = JSON.parse(searches); } catch (_) {}
+          if (Array.isArray(searches)) allSearches.push(...searches.filter(s => s && s.query));
+        } catch (_) {}
+      }
     }
 
+    // Final fallback: use user query directly
+    if (allSearches.length === 0) {
+      console.log("[Stream] No tool calls from Cerebras, falling back to user query");
+      allSearches.push({ query: message, numResults: 5 });
+    }
+
+    // Step 2: Search Exa with the generated queries
     sendEvent("search_start", { queries: allSearches.map(s => s.query) });
 
     console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 5} results)`).join(", ")}`);
     const searchStart = Date.now();
-    const searchResults = await searchMultiple(allSearches);
+    const searchResults = await searchMultiple(allSearches, searchType);
     const searchTimeMs = Date.now() - searchStart;
     const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
-    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms`);
+    const exaServerTimeMs = searchResults.reduce((best, s) => Math.max(best, s.exaServerTimeMs || 0), 0) || null;
+    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms (server: ${exaServerTimeMs}ms)`);
 
     sendEvent("search_complete", {
       searchTimeMs,
+      exaServerTimeMs,
       totalSources,
       searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
@@ -417,41 +518,61 @@ export default async function handler(req, res) {
         }
         const items = results.map((r) => {
           const date = r.publishedDate ? ` | ${r.publishedDate.slice(0, 10)}` : "";
-          return `- ${r.title}${date}\n  ${r.url}\n  ${r.text?.slice(0, 600) || ""}`;
+          return `- ${r.title}${date}\n  ${r.url}\n  ${r.text?.slice(0, 2000) || ""}`;
         }).join("\n");
         return `[${query}${category ? ` (${category})` : ""}]\n${items}`;
       })
       .join("\n\n");
 
-    const toolMessages = toolCallIds.map(id => ({
-      role: "tool",
-      tool_call_id: id,
-      content: resultsText,
+    // Step 3: Cerebras generates the final response with search results as context
+    const currentDate = new Date().toLocaleDateString('en-US', {
+      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+    });
+    const summarizePrompt = `You are a helpful assistant. Today's date is ${currentDate}.
+You will receive web search results and must use them to answer the user's question.
+
+Rules:
+- Use ONLY the information from the search results provided. Do not make up facts.
+- When sources conflict, prefer the MOST RECENTLY published source (check the dates).
+- Be direct and confident. Start with the answer, not preamble like "The user asked" or "According to search results".
+- Do NOT include raw URLs, source blocks, or search result text in your response. Write natural prose only.
+- Do NOT cite sources by pasting URLs or raw text. Just mention the source name if relevant (e.g. "according to ESPN").
+- Use clear formatting with bullet points or numbered lists when helpful.
+- Do NOT include charts unless the user explicitly asks for them.`;
+
+    const exaMessages = [
+      { role: "system", content: summarizePrompt },
+      ...recentHistory,
+      { role: "user", content: `${message}\n\n---\nWEB SEARCH RESULTS (today is ${currentDate}, prefer most recent sources):\n${resultsText}\n---\nAnswer the question using the search results above. When sources disagree, trust the most recently dated source.` },
+    ];
+
+    const finalCallStart = Date.now();
+    const finalStream = await withRetry(() => cerebrasClient.chat.completions.create({
+      model,
+      messages: exaMessages,
+      stream: true,
     }));
 
-    const finalStream = await client.chat.completions.create({
-      model,
-      messages: [
-        ...messages,
-        assistantMessage,
-        ...toolMessages,
-      ],
-      stream: true,
-    });
-
+    // Collect the full final response, then clean and send
+    let fullFinal = "";
     for await (const chunk of finalStream) {
       const content = chunk.choices[0]?.delta?.content;
-      if (content) {
-        sendEvent("content", { content });
-      }
+      if (content) fullFinal += content;
+    }
+    const cleanedFinal = stripLeakedArtifacts(fullFinal.trimStart());
+    if (cleanedFinal) {
+      sendEvent("content", { content: cleanedFinal });
     }
 
-    sendEvent("done", { exaUsed: true, searchTimeMs, totalSources });
+    const finalCallMs = Date.now() - finalCallStart;
+    sendEvent("done", { exaUsed: true, toolCallMs: queryGenMs, searchTimeMs, exaServerTimeMs, totalSources, synthesisMs: finalCallMs });
     res.end();
 
   } catch (err) {
     console.error(err);
     sendEvent("error", { error: err.message });
     res.end();
+  } finally {
+    clearInterval(heartbeatInterval);
   }
 }

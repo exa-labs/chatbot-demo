@@ -4,6 +4,10 @@
   "outputDirectory": "frontend/dist",
   "installCommand": "npm install && cd frontend && npm install",
   "framework": null,
+    "functions": {
+      "api/chat/stream.js": { "maxDuration": 120 },
+      "api/chat.js": { "maxDuration": 120 }
+    },
   "rewrites": [
     { "source": "/chatbot-demo/api/chat/stream", "destination": "/api/chat/stream" },
     { "source": "/chatbot-demo/api/chat", "destination": "/api/chat" },

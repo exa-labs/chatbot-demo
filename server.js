@@ -10,12 +10,69 @@ app.use(cors());
 app.use(express.json());
 
 const client = new OpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPEN_ROUTER_KEY,
+  baseURL: "https://api.cerebras.ai/v1",
+  apiKey: process.env.CEREBRAS_API_KEY || "csk-ctnvpnrpxw5t244c83c84pdecwk9tpfdp3jkvece9kve248x",
 });
 
 // Default model
-const DEFAULT_MODEL = "google/gemini-2.5-flash";
+const DEFAULT_MODEL = "llama3.1-8b";
+
+/**
+ * Attempt to parse a tool call from content text that the model output
+ * instead of using the structured tool_calls field.
+ * Handles multiple malformed JSON formats from llama3.1-8b.
+ * Returns { name, arguments } or null.
+ */
+function tryExtractToolCallFromContent(content) {
+  const trimmed = content.trim();
+
+  // Find the first '{' - model may prefix with "assistant", role text, etc.
+  const jsonStart = trimmed.indexOf("{");
+  if (jsonStart === -1) return null;
+  const jsonCandidate = trimmed.slice(jsonStart);
+
+  // Try 1: Direct JSON.parse
+  try {
+    const parsed = JSON.parse(jsonCandidate);
+    let name = parsed.name;
+    let args = parsed.arguments || parsed.parameters;
+    if (!name && parsed.function) {
+      name = parsed.function.name;
+      args = parsed.function.arguments || parsed.function.parameters;
+    }
+    if (name && args) {
+      return {
+        name,
+        arguments: typeof args === 'string' ? args : JSON.stringify(args),
+      };
+    }
+  } catch (_) {}
+
+  // Try 2: Regex extraction for malformed JSON (unescaped inner quotes, single quotes, etc.)
+  const nameMatch = jsonCandidate.match(/["']?name["']?\s*:\s*["']([^"']+)["']/);
+  if (!nameMatch) return null;
+  const name = nameMatch[1];
+  if (name !== "web_search") return null;
+
+  const queries = [];
+  // Match query values with both double and single quotes
+  const queryRegex = /["']?query["']?\s*:\s*["']((?:[^"'\\]|\\.)*)["']/g;
+  let match;
+  while ((match = queryRegex.exec(jsonCandidate)) !== null) {
+    const q = match[1].replace(/\\["']/g, m => m[1]).replace(/\\\\/g, '\\');
+    if (q.trim()) queries.push(q.trim());
+  }
+
+  if (queries.length > 0) {
+    const searches = queries.map(q => ({ query: q, numResults: 5 }));
+    return {
+      name,
+      arguments: JSON.stringify({ searches }),
+    };
+  }
+
+  return null;
+}
 
 const getSearchTool = () => {
   const today = new Date().toLocaleDateString('en-US', {
@@ -71,6 +128,15 @@ app.post("/api/chat/stream", async (req, res) => {
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
+  res.flushHeaders();
+
+  // Send initial SSE comment to establish data flow and prevent connection stall
+  res.write(":ok\n\n");
+
+  // Heartbeat to keep SSE connection alive during silent buffering phases
+  const heartbeatInterval = setInterval(() => {
+    res.write(":heartbeat\n\n");
+  }, 3000);
 
   const sendEvent = (event, data) => {
     res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
@@ -80,9 +146,12 @@ app.post("/api/chat/stream", async (req, res) => {
     const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
     console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}`);
 
-    const recentHistory = history.slice(-20).map(msg => ({
+    // Truncate assistant messages to avoid overwhelming the 8B model with long context
+    const recentHistory = history.slice(-10).map(msg => ({
       role: msg.role,
-      content: msg.content,
+      content: msg.role === 'assistant' && msg.content && msg.content.length > 500
+        ? msg.content.slice(0, 500) + '...'
+        : msg.content,
     }));
 
     const messages = [
@@ -91,49 +160,71 @@ app.post("/api/chat/stream", async (req, res) => {
       { role: "user", content: message },
     ];
 
-    // Stream first call to detect tool calls while streaming
-    const stream = await client.chat.completions.create({
-      model,
-      messages,
-      tools: exaEnabled ? [getSearchTool()] : undefined,
-      stream: true,
-    });
+    // Helper: stream a completion and extract tool calls + content
+    async function streamAndParse() {
+      const s = await client.chat.completions.create({
+        model,
+        messages,
+        tools: exaEnabled ? [getSearchTool()] : undefined,
+        stream: true,
+      });
 
-    // Accumulate tool calls and content from stream
-    let toolCalls = [];
-    let contentBuffer = "";
-    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
+      let tc = [];
+      let buf = "";
 
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
-
-      // Stream content immediately
-      if (delta?.content) {
-        contentBuffer += delta.content;
-        sendEvent("content", { content: delta.content });
-      }
-
-      // Accumulate tool calls
-      if (delta?.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index;
-          if (!toolCalls[idx]) {
-            toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
+      for await (const chunk of s) {
+        const delta = chunk.choices[0]?.delta;
+        if (delta?.content) buf += delta.content;
+        if (delta?.tool_calls) {
+          for (const call of delta.tool_calls) {
+            const idx = call.index;
+            if (!tc[idx]) tc[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
+            if (call.id) tc[idx].id = call.id;
+            if (call.function?.name) tc[idx].function.name = call.function.name;
+            if (call.function?.arguments) tc[idx].function.arguments += call.function.arguments;
           }
-          if (tc.id) toolCalls[idx].id = tc.id;
-          if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
-          if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
         }
       }
+
+      // Detect tool calls output as content text
+      if (tc.length === 0 && buf) {
+        const extracted = tryExtractToolCallFromContent(buf);
+        if (extracted) {
+          tc = [{ id: "manual_tool_call_0", type: "function", function: extracted }];
+          buf = "";
+        }
+      }
+
+      return { toolCalls: tc, contentBuffer: buf };
     }
 
-    // No tool calls - we already streamed the response
+    // Retry once if model returns empty (llama3.1-8b intermittently returns nothing)
+    let { toolCalls, contentBuffer } = await streamAndParse();
+    if (toolCalls.length === 0 && !contentBuffer.trim()) {
+      console.log("[Stream] Empty response from model, retrying once...");
+      ({ toolCalls, contentBuffer } = await streamAndParse());
+    }
+
+    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
+
+    // If content looks like an undetected tool call, retry once
+    if (toolCalls.length === 0 && contentBuffer && contentBuffer.includes("web_search")) {
+      console.log("[Stream] Content looks like undetected tool call, retrying...");
+      ({ toolCalls, contentBuffer } = await streamAndParse());
+    }
+
     if (toolCalls.length === 0) {
+      // Safety net: suppress raw tool-call-shaped JSON from reaching the client
+      if (contentBuffer && contentBuffer.trim().startsWith("{") && contentBuffer.includes("web_search")) {
+        console.log("[Stream] Suppressing leaked tool call JSON");
+        sendEvent("content", { content: "I encountered an issue processing your request. Please try again." });
+      } else if (contentBuffer) {
+        sendEvent("content", { content: contentBuffer });
+      }
       sendEvent("done", { exaUsed: false });
       return res.end();
     }
 
-    // Build assistant message for tool call flow
     assistantMessage.content = contentBuffer || null;
     assistantMessage.tool_calls = toolCalls;
 
@@ -145,7 +236,21 @@ app.post("/api/chat/stream", async (req, res) => {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
 
-        // Handle case where model returns a single search object instead of array
+        if (typeof searches === 'string') {
+          try { searches = JSON.parse(searches); } catch (_) {
+            // Fallback: Python-style dict with single quotes
+            try { searches = JSON.parse(searches.replace(/'/g, '"')); } catch (_2) {
+              // Last resort: regex extract queries from the string
+              const qr = /["']query["']\s*:\s*["']([^"']+)["']/g;
+              let qm; const qMatches = [];
+              while ((qm = qr.exec(searches)) !== null) {
+                qMatches.push({ query: qm[1].trim(), numResults: 5 });
+              }
+              if (qMatches.length > 0) searches = qMatches;
+            }
+          }
+        }
+
         if (searches && !Array.isArray(searches)) {
           searches = [searches];
         }
@@ -156,9 +261,12 @@ app.post("/api/chat/stream", async (req, res) => {
         }
 
         if (Array.isArray(searches)) {
-          // Filter out invalid searches (missing query)
-          const validSearches = searches.filter(s => s && typeof s.query === 'string' && s.query.trim());
-          allSearches.push(...validSearches);
+          const normalized = searches.map(s => {
+            if (typeof s === 'string' && s.trim()) return { query: s.trim() };
+            if (s && typeof s.query === 'string' && s.query.trim()) return s;
+            return null;
+          }).filter(Boolean);
+          allSearches.push(...normalized);
         }
         toolCallIds.push(toolCall.id);
       } catch (e) {
@@ -221,7 +329,7 @@ app.post("/api/chat/stream", async (req, res) => {
       content: resultsText,
     }));
 
-    // Stream the final response
+    // Stream the final response, filtering out any tool call JSON the model leaks
     const finalStream = await client.chat.completions.create({
       model,
       messages: [
@@ -232,10 +340,38 @@ app.post("/api/chat/stream", async (req, res) => {
       stream: true,
     });
 
+    let finalBuffer = "";
+    let streaming = false;
     for await (const chunk of finalStream) {
       const content = chunk.choices[0]?.delta?.content;
-      if (content) {
+      if (!content) continue;
+      if (streaming) {
         sendEvent("content", { content });
+        continue;
+      }
+      finalBuffer += content;
+      const trimmed = finalBuffer.trimStart();
+      if (trimmed.startsWith("{")) {
+        if (trimmed.includes("}") && trimmed.indexOf("}") < trimmed.length - 1) {
+          const afterJson = trimmed.slice(trimmed.lastIndexOf("}") + 1);
+          const cleaned = afterJson.replace(/^\s*assistant\s*/i, "").trimStart();
+          if (cleaned) {
+            sendEvent("content", { content: cleaned });
+          }
+          streaming = true;
+        }
+        continue;
+      }
+      const cleaned = trimmed.replace(/^\s*assistant\s*/i, "").trimStart();
+      if (cleaned) {
+        sendEvent("content", { content: cleaned });
+      }
+      streaming = true;
+    }
+    if (!streaming && finalBuffer) {
+      const trimmed = finalBuffer.trim();
+      if (!trimmed.startsWith("{")) {
+        sendEvent("content", { content: trimmed });
       }
     }
 
@@ -246,6 +382,8 @@ app.post("/api/chat/stream", async (req, res) => {
     console.error(err);
     sendEvent("error", { error: err.message });
     res.end();
+  } finally {
+    clearInterval(heartbeatInterval);
   }
 });
 
@@ -254,9 +392,12 @@ app.post("/api/chat", async (req, res) => {
   try {
     const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
 
-    const recentHistory = history.slice(-20).map(msg => ({
+    // Truncate assistant messages to avoid overwhelming the 8B model with long context
+    const recentHistory = history.slice(-10).map(msg => ({
       role: msg.role,
-      content: msg.content,
+      content: msg.role === 'assistant' && msg.content && msg.content.length > 500
+        ? msg.content.slice(0, 500) + '...'
+        : msg.content,
     }));
 
     const messages = [
@@ -273,17 +414,46 @@ app.post("/api/chat", async (req, res) => {
 
     const choice = response.choices[0];
 
-    if (!choice.message.tool_calls) {
+    // llama3.1-8b sometimes outputs tool calls as content text
+    let toolCallsList = choice.message.tool_calls;
+    let choiceMessage = choice.message;
+    if (!toolCallsList && choice.message.content) {
+      const extracted = tryExtractToolCallFromContent(choice.message.content);
+      if (extracted) {
+        toolCallsList = [{
+          id: "manual_tool_call_0",
+          type: "function",
+          function: extracted,
+        }];
+        choiceMessage = { role: "assistant", content: null, tool_calls: toolCallsList };
+      }
+    }
+
+    if (!toolCallsList) {
       return res.json({ content: choice.message.content, searches: null, exaUsed: false });
     }
 
-    // Collect searches with defensive parsing
     const allSearches = [];
     const toolCallIds = [];
-    for (const toolCall of choice.message.tool_calls) {
+    for (const toolCall of toolCallsList) {
       try {
         const args = JSON.parse(toolCall.function.arguments);
         let searches = args.searches;
+
+        if (typeof searches === 'string') {
+          try { searches = JSON.parse(searches); } catch (_) {
+            // Fallback: Python-style dict with single quotes
+            try { searches = JSON.parse(searches.replace(/'/g, '"')); } catch (_2) {
+              // Last resort: regex extract queries from the string
+              const qr = /["']query["']\s*:\s*["']([^"']+)["']/g;
+              let qm; const qMatches = [];
+              while ((qm = qr.exec(searches)) !== null) {
+                qMatches.push({ query: qm[1].trim(), numResults: 5 });
+              }
+              if (qMatches.length > 0) searches = qMatches;
+            }
+          }
+        }
 
         if (searches && !Array.isArray(searches)) {
           searches = [searches];
@@ -293,8 +463,12 @@ app.post("/api/chat", async (req, res) => {
         }
 
         if (Array.isArray(searches)) {
-          const validSearches = searches.filter(s => s && typeof s.query === 'string' && s.query.trim());
-          allSearches.push(...validSearches);
+          const normalized = searches.map(s => {
+            if (typeof s === 'string' && s.trim()) return { query: s.trim() };
+            if (s && typeof s.query === 'string' && s.query.trim()) return s;
+            return null;
+          }).filter(Boolean);
+          allSearches.push(...normalized);
         }
         toolCallIds.push(toolCall.id);
       } catch (e) {
@@ -337,13 +511,22 @@ app.post("/api/chat", async (req, res) => {
       model,
       messages: [
         ...messages,
-        choice.message,
+        choiceMessage,
         ...toolMessages,
       ],
     });
 
+    let finalContent = finalResponse.choices[0].message.content || "";
+    const trimmedFinal = finalContent.trimStart();
+    if (trimmedFinal.startsWith("{") && trimmedFinal.includes("}")) {
+      const afterJson = trimmedFinal.slice(trimmedFinal.lastIndexOf("}") + 1);
+      finalContent = afterJson.replace(/^\s*assistant\s*/i, "").trim();
+    } else {
+      finalContent = trimmedFinal.replace(/^\s*assistant\s*/i, "").trimStart();
+    }
+
     res.json({
-      content: finalResponse.choices[0].message.content,
+      content: finalContent,
       searches: searchResults.map(({ query, category, results, timeMs }) => ({
         query,
         category,

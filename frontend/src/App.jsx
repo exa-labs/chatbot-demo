@@ -1,6 +1,6 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight, RefreshCw } from "lucide-react";
 import { ToggleElevated, CardGalleryItem } from "./components";
 import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
 import { PageHeader } from "./components/PageHeader";
@@ -9,16 +9,15 @@ import Button from "./components/Button";
 import Lottie from "lottie-react";
 import { getApiPath } from "./lib/basePath";
 import exaLogomarkBlue from "./assets/exa-logomark-blue.svg";
+import cerebrasLogo from "./assets/cerebras-logo.svg";
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend } from 'chart.js';
 import { Bar, Line, Pie, Doughnut } from 'react-chartjs-2';
 import ReactMarkdown from 'react-markdown';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 
-// Register Chart.js components
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, ArcElement, Title, Tooltip, Legend);
 
-// Default suggestion tags - defined outside component to prevent recreation
 const DEFAULT_SUGGESTIONS = [
   "What's trending in tech today?",
   "What are the top AI startups in 2026?",
@@ -27,291 +26,6 @@ const DEFAULT_SUGGESTIONS = [
   "What's the current Bitcoin price?",
 ];
 
-function App() {
-  const [chats, setChats] = useState([{ id: Date.now(), title: "New Chat", messages: [] }]);
-  const [currentChatId, setCurrentChatId] = useState(chats[0].id);
-  const [isLoading, setIsLoading] = useState(false);
-  const [exaEnabled, setExaEnabled] = useState(true);
-  const [followups, setFollowups] = useState([]);
-  const [model, setModel] = useState("google/gemini-2.5-flash");
-  const messagesEndRef = useRef(null);
-
-  const currentChat = chats.find(c => c.id === currentChatId) || chats[0];
-  const messages = currentChat.messages;
-
-  const setMessages = (updater) => {
-    setChats(prev => prev.map(chat =>
-      chat.id === currentChatId
-        ? { ...chat, messages: typeof updater === 'function' ? updater(chat.messages) : updater }
-        : chat
-    ));
-  };
-
-  const createNewChat = () => {
-    const newChat = { id: Date.now(), title: "New Chat", messages: [] };
-    setChats(prev => [newChat, ...prev]);
-    setCurrentChatId(newChat.id);
-    setFollowups([]);
-  };
-
-  const updateChatTitle = (chatId, firstMessage) => {
-    const title = firstMessage.slice(0, 30) + (firstMessage.length > 30 ? "..." : "");
-    setChats(prev => prev.map(chat =>
-      chat.id === chatId ? { ...chat, title } : chat
-    ));
-  };
-
-  // Debounced scroll for smoother experience
-  const scrollTimeoutRef = useRef(null);
-  const isUserAtBottomRef = useRef(true);
-
-  const scrollToBottom = (behavior = "instant") => {
-    // Check if user is near bottom (within 100px)
-    const element = messagesEndRef.current?.parentElement;
-    if (element) {
-      const isNearBottom = element.scrollHeight - element.scrollTop - element.clientHeight < 100;
-      isUserAtBottomRef.current = isNearBottom;
-    }
-
-    // Only auto-scroll if user is at bottom
-    if (isUserAtBottomRef.current) {
-      messagesEndRef.current?.scrollIntoView({ behavior });
-    }
-  };
-
-  const debouncedScroll = () => {
-    if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-    scrollTimeoutRef.current = setTimeout(() => {
-      // Use instant scroll during streaming for smoothness
-      const behavior = isLoading ? "instant" : "smooth";
-      scrollToBottom(behavior);
-    }, 150);
-  };
-
-  useEffect(() => {
-    debouncedScroll();
-    return () => {
-      if (scrollTimeoutRef.current) clearTimeout(scrollTimeoutRef.current);
-    };
-  }, [messages, isLoading]);
-
-  const handleSubmit = async (message) => {
-    if (!message.trim()) return;
-
-    // Update chat title if first message
-    if (messages.length === 0) {
-      updateChatTitle(currentChatId, message || "New Chat");
-    }
-
-    // Add user message
-    const userMessage = { role: "user", content: message };
-    setMessages((prev) => [...prev, userMessage]);
-    setIsLoading(true);
-
-    // Add placeholder for streaming assistant message
-    const assistantMessageId = Date.now();
-    setMessages((prev) => [
-      ...prev,
-      { id: assistantMessageId, role: "assistant", content: "", streaming: true },
-    ]);
-
-    try {
-      const response = await fetch(getApiPath("/api/chat/stream"), {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          message: message,
-          history: messages,
-          exaEnabled,
-          model,
-        }),
-      });
-
-      if (!response.ok) {
-        throw new Error(`Server error: ${response.status}`);
-      }
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = "";
-      let searches = null;
-      let exaUsed = false;
-      let searchTimeMs = null;
-      let totalSources = null;
-
-      // Batching for smoother streaming
-      let contentBuffer = "";
-      let batchTimeout = null;
-      const BATCH_DELAY = 16; // 16ms batching window (~60fps)
-
-      const flushContentBuffer = () => {
-        if (contentBuffer) {
-          const bufferedContent = contentBuffer;
-          contentBuffer = "";
-          setMessages((prev) =>
-            prev.map((msg) =>
-              msg.id === assistantMessageId
-                ? { ...msg, content: msg.content + bufferedContent }
-                : msg
-            )
-          );
-        }
-      };
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) {
-          // Flush any remaining buffered content
-          if (batchTimeout) clearTimeout(batchTimeout);
-          flushContentBuffer();
-          break;
-        }
-
-        buffer += decoder.decode(value, { stream: true });
-        const lines = buffer.split("\n");
-        buffer = lines.pop() || "";
-
-        for (const line of lines) {
-          if (line.startsWith("event: ")) {
-            const eventType = line.slice(7);
-            continue;
-          }
-          if (line.startsWith("data: ")) {
-            const data = JSON.parse(line.slice(6));
-
-            // Handle search_start - mark message as searching and save queries
-            if (data.queries) {
-              // Flush content buffer before state change
-              if (batchTimeout) clearTimeout(batchTimeout);
-              flushContentBuffer();
-
-              setMessages((prev) =>
-                prev.map((msg) =>
-                  msg.id === assistantMessageId
-                    ? { ...msg, searching: true, queries: data.queries }
-                    : msg
-                )
-              );
-            }
-
-            if (data.content) {
-              // Batch content updates for smoother streaming
-              contentBuffer += data.content;
-
-              if (batchTimeout) clearTimeout(batchTimeout);
-              batchTimeout = setTimeout(flushContentBuffer, BATCH_DELAY);
-            }
-
-            if (data.searches) {
-              searches = data.searches;
-              searchTimeMs = data.searchTimeMs;
-              totalSources = data.totalSources;
-            }
-
-            if (data.exaUsed !== undefined) {
-              exaUsed = data.exaUsed;
-            }
-
-            if (data.error) {
-              throw new Error(data.error);
-            }
-          }
-        }
-      }
-
-      // Finalize the message and extract followups
-      setMessages((prev) => {
-        const updatedMessages = prev.map((msg) => {
-          if (msg.id === assistantMessageId) {
-            // Extract followups from content
-            const followupMatch = msg.content.match(/```followups\s*\n?([\s\S]*?)\n?```/);
-            if (followupMatch) {
-              try {
-                const parsedFollowups = JSON.parse(followupMatch[1].trim());
-                setFollowups(parsedFollowups);
-              } catch (e) {
-                // Failed to parse followups
-              }
-            }
-            return { ...msg, streaming: false, searches, exaUsed, searchTimeMs, totalSources };
-          }
-          return msg;
-        });
-        return updatedMessages;
-      });
-    } catch (error) {
-      console.error("Error:", error);
-      setMessages((prev) =>
-        prev.map((msg) =>
-          msg.id === assistantMessageId
-            ? { ...msg, content: `Error: ${error.message}`, error: true, streaming: false }
-            : msg
-        )
-      );
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  return (
-    <div className={`relative flex min-h-screen flex-col ${exaEnabled ? "" : "bg-[#dcdce0]"}`}>
-      {/* White background when Exa is ON */}
-      {exaEnabled && (
-        <div className="fixed inset-0 z-0 bg-white" />
-      )}
-
-      <PageHeader
-        title="Exa Chatbot Demo"
-        subtitle="AI chatbot with real-time web search powered by Exa"
-        rightContent={
-          <Link to="/tutorial">
-            <Button
-              variant="default"
-              size="sm"
-              icon={ArrowRight}
-              iconPosition="end"
-              className="w-[140px] justify-between"
-            >
-              How It Works
-            </Button>
-          </Link>
-        }
-      />
-
-      {/* Chat Area */}
-      <main className="relative z-[1] flex-1 overflow-y-auto">
-        <div className="mx-auto max-w-4xl px-6 py-8">
-          {messages.length === 0 ? (
-            <EmptyState onSubmit={handleSubmit} suggestions={DEFAULT_SUGGESTIONS} disabled={isLoading} exaEnabled={exaEnabled} />
-          ) : (
-            <div className="space-y-6">
-              {messages.map((msg, i) => (
-                <Message key={i} message={msg} />
-              ))}
-              <div ref={messagesEndRef} />
-            </div>
-          )}
-        </div>
-      </main>
-
-      {/* Input Area - only show when there are messages */}
-      {messages.length > 0 && (
-        <footer className="relative z-[1] sticky bottom-0 border-t border-[#e5e5e5] bg-white/80 backdrop-blur-sm">
-          <div className="mx-auto max-w-4xl px-6 py-4">
-            <ChatInputBlue
-              placeholder="Ask about anything on the web..."
-              tags={followups.length > 0 ? followups : DEFAULT_SUGGESTIONS}
-              onSubmit={handleSubmit}
-              disabled={isLoading}
-            />
-          </div>
-        </footer>
-      )}
-    </div>
-  );
-}
-
-// Multi-hop search nudges for empty state
 const SEARCH_NUDGES = [
   {
     title: "Multi-source Analysis",
@@ -322,49 +36,461 @@ const SEARCH_NUDGES = [
     prompt: `What are the most promising AI safety breakthroughs from ${new Date().getFullYear()}?`
   },
   {
-    title: "Market Intelligence",
-    prompt: "Which YC-backed startups in autonomous vehicles raised funding this month?"
+    title: "Super Bowl",
+    prompt: "Who won the Super Bowl?"
   }
 ];
 
-// Empty state component with centered input
-function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
+// Stream a request to one pane and update its state
+async function streamPane({ message, history, exaEnabled, exaMode, assistantId, setMessages, setLoading, setLatency }) {
+  const startTime = Date.now();
+  let searches = null;
+  let searchTimeMs = null;
+  let totalSources = null;
+
+  try {
+    const truncatedHistory = history
+      .filter(m => m.role === "user" || (m.role === "assistant" && m.content))
+      .slice(-10)
+      .map(m => ({ role: m.role, content: m.content }));
+
+    const response = await fetch(getApiPath("/api/chat/stream"), {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        message,
+        history: truncatedHistory,
+        exaEnabled,
+        exaMode: exaEnabled ? exaMode : undefined,
+        model: "llama3.1-8b",
+      }),
+    });
+
+    if (!response.ok) throw new Error(`Server error: ${response.status}`);
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = "";
+    let contentBuffer = "";
+    let batchTimeout = null;
+
+    const flushContent = () => {
+      if (contentBuffer) {
+        const c = contentBuffer;
+        contentBuffer = "";
+        setMessages(prev => prev.map(msg =>
+          msg.id === assistantId ? { ...msg, content: msg.content + c } : msg
+        ));
+      }
+    };
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        if (batchTimeout) clearTimeout(batchTimeout);
+        flushContent();
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split("\n");
+      buffer = lines.pop() || "";
+
+      for (const line of lines) {
+        if (!line.startsWith("data: ")) continue;
+        let data;
+        try { data = JSON.parse(line.slice(6)); } catch { continue; }
+
+        if (data.queries) {
+          if (batchTimeout) clearTimeout(batchTimeout);
+          flushContent();
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantId ? { ...msg, searching: true, queries: data.queries } : msg
+          ));
+        }
+
+        if (data.content) {
+          contentBuffer += data.content;
+          if (batchTimeout) clearTimeout(batchTimeout);
+          batchTimeout = setTimeout(flushContent, 16);
+        }
+
+        if (data.searches) {
+          searches = data.searches;
+          searchTimeMs = data.exaServerTimeMs || data.searchTimeMs;
+          totalSources = data.totalSources;
+          // Show sources immediately when Exa returns (before LLM streaming starts)
+          if (batchTimeout) clearTimeout(batchTimeout);
+          flushContent();
+          setMessages(prev => prev.map(msg =>
+            msg.id === assistantId ? { ...msg, searching: false, searchesReady: true, searches: data.searches, totalSources: data.totalSources, searchTimeMs: data.exaServerTimeMs || data.searchTimeMs } : msg
+          ));
+        }
+
+        if (data.exaUsed !== undefined) {
+          const totalMs = Date.now() - startTime;
+          if (exaEnabled && data.exaUsed) {
+            const toolCallMs = data.toolCallMs || 0;
+            const exaMs = data.exaServerTimeMs || data.searchTimeMs || searchTimeMs || 0;
+            const synthesisMs = data.synthesisMs || 0;
+            setLatency({
+              totalMs,
+              toolCallMs,
+              exaMs,
+              synthesisMs,
+            });
+          } else {
+            setLatency({ totalMs: data.totalMs || totalMs });
+          }
+        }
+
+        if (data.error) throw new Error(data.error);
+      }
+    }
+
+    // Finalize message
+    setMessages(prev => prev.map(msg => {
+      if (msg.id === assistantId) {
+        return { ...msg, streaming: false, searches, exaUsed: exaEnabled && !!searches, searchTimeMs, totalSources };
+      }
+      return msg;
+    }));
+  } catch (error) {
+    console.error("Stream error:", error);
+    const totalMs = Date.now() - startTime;
+    if (!exaEnabled) setLatency({ totalMs });
+    setMessages(prev => prev.map(msg =>
+      msg.id === assistantId
+        ? { ...msg, content: `Error: ${error.message}`, error: true, streaming: false }
+        : msg
+    ));
+  } finally {
+    setLoading(false);
+  }
+}
+
+function App() {
+  const [hasStarted, setHasStarted] = useState(false);
+  const [exaMode, setExaMode] = useState("instant");
+
+  // Left pane (without Exa)
+  const [leftMessages, setLeftMessages] = useState([]);
+  const [leftLoading, setLeftLoading] = useState(false);
+  const [leftLatency, setLeftLatency] = useState(null);
+
+  // Right pane (with Exa)
+  const [rightMessages, setRightMessages] = useState([]);
+  const [rightLoading, setRightLoading] = useState(false);
+  const [rightLatency, setRightLatency] = useState(null);
+
+  const leftScrollRef = useRef(null);
+  const rightScrollRef = useRef(null);
+
+  // Auto-scroll both panes
+  useEffect(() => {
+    if (leftScrollRef.current) {
+      const el = leftScrollRef.current;
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+      if (nearBottom) el.scrollTop = el.scrollHeight;
+    }
+  }, [leftMessages]);
+
+  useEffect(() => {
+    if (rightScrollRef.current) {
+      const el = rightScrollRef.current;
+      const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 150;
+      if (nearBottom) el.scrollTop = el.scrollHeight;
+    }
+  }, [rightMessages]);
+
+  const handleSubmit = async (message) => {
+    if (!message.trim() || leftLoading || rightLoading) return;
+    setHasStarted(true);
+    setLeftLatency(null);
+    setRightLatency(null);
+
+    const leftHistory = [...leftMessages];
+    const rightHistory = [...rightMessages];
+
+    const userMsg = { role: "user", content: message };
+    const leftId = Date.now();
+    const rightId = leftId + 1;
+
+    setLeftMessages(prev => [...prev, userMsg, { id: leftId, role: "assistant", content: "", streaming: true }]);
+    setRightMessages(prev => [...prev, userMsg, { id: rightId, role: "assistant", content: "", streaming: true }]);
+    setLeftLoading(true);
+    setRightLoading(true);
+
+    await Promise.allSettled([
+      streamPane({
+        message,
+        history: leftHistory,
+        exaEnabled: false,
+        exaMode: null,
+        assistantId: leftId,
+        setMessages: setLeftMessages,
+        setLoading: setLeftLoading,
+        setLatency: setLeftLatency,
+      }),
+      streamPane({
+        message,
+        history: rightHistory,
+        exaEnabled: true,
+        exaMode,
+        assistantId: rightId,
+        setMessages: setRightMessages,
+        setLoading: setRightLoading,
+        setLatency: setRightLatency,
+      }),
+    ]);
+  };
+
+  if (!hasStarted) {
+    return (
+      <div className="flex flex-col min-h-screen bg-white">
+        <header className="px-6 py-4 border-b border-[#e5e5e5]">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <img src={exaLogomarkBlue} alt="Exa" className="h-6 w-6" />
+              <h1 className="text-xl font-semibold text-[#000911]">Exa Chatbot Demo</h1>
+              <span className="text-sm text-[#60646c]">Powered by Cerebras inference</span>
+              <img src={cerebrasLogo} alt="Cerebras" className="h-4 w-4" />
+            </div>
+            <ModeDropdown mode={exaMode} onChange={setExaMode} disabled={false} />
+          </div>
+          <p className="text-sm text-[#9ca3af] mt-1">Model: llama3.1-8b &middot; Side-by-side comparison: with and without Exa search</p>
+        </header>
+        <main className="flex-1 flex items-center justify-center">
+          <EmptyState onSubmit={handleSubmit} suggestions={DEFAULT_SUGGESTIONS} disabled={false} />
+        </main>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex min-h-[50vh] flex-col items-center justify-center text-center -mt-8">
-      <div className="w-full max-w-4xl mx-auto px-6">
-        <div className="rounded-2xl bg-[#fafafa] border border-[#f0f0f0] p-8">
-          {/* Search Nudges */}
-          {exaEnabled && (
-            <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
-              {SEARCH_NUDGES.map((nudge, i) => (
-                <button
-                  key={i}
-                  onClick={() => onSubmit(nudge.prompt)}
-                  disabled={disabled}
-                  className="group relative rounded-xl border border-[#e5e5e5] bg-white p-6 text-left transition-all hover:border-[#0040f0] hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
-                >
-                  <div className="mb-2 text-sm font-medium text-[#60646c]">{nudge.title}</div>
-                  <div className="text-sm text-[#000911] group-hover:text-[#0040f0] transition-colors">
-                    {nudge.prompt}
-                  </div>
-                </button>
+    <div className="flex flex-col h-screen bg-white">
+      {/* Compact header */}
+      <header className="flex items-center gap-3 px-5 py-2.5 border-b border-[#e5e5e5] bg-white shrink-0">
+        <img src={exaLogomarkBlue} alt="Exa" className="h-5 w-5" />
+        <span className="text-base font-semibold text-[#000911]">Exa Chatbot Demo</span>
+        <span className="text-xs text-[#9ca3af]">Cerebras llama3.1-8b</span>
+      </header>
+
+      {/* Split panes */}
+      <div className="flex flex-1 min-h-0">
+        {/* Left Pane - Without Exa */}
+        <div className="flex-1 flex flex-col border-r border-[#e5e5e5]">
+          <div className="flex items-center justify-between px-4 h-10 bg-[#fafafa] border-b border-[#e5e5e5] shrink-0">
+            <div className="flex items-center gap-2">
+              <div className="h-2 w-2 rounded-full bg-[#d4d4d4]" />
+              <span className="text-[13px] font-semibold text-[#000911]">Without Exa</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <img src={cerebrasLogo} alt="" className="h-3.5 w-3.5" />
+              <span className="text-[11px] text-[#9ca3af]">Cerebras only</span>
+            </div>
+          </div>
+
+          <div ref={leftScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+            <div className="max-w-2xl mx-auto space-y-4">
+              {leftMessages.map((msg, i) => (
+                <Message key={i} message={msg} />
               ))}
             </div>
-          )}
+          </div>
 
+          <LatencyBar latency={leftLatency} side="left" />
+        </div>
+
+        {/* Right Pane - With Exa */}
+        <div className="flex-1 flex flex-col">
+          <div className="flex items-center justify-between px-4 h-10 bg-[#fafafa] border-b border-[#e5e5e5] shrink-0">
+            <div className="flex items-center gap-2">
+              <img src={exaLogomarkBlue} alt="Exa" className="h-3.5 w-3.5" />
+              <span className="text-[13px] font-semibold text-[#000911]">With Exa</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  if (leftLoading || rightLoading) return;
+                  setHasStarted(false);
+                  setLeftMessages([]);
+                  setRightMessages([]);
+                  setLeftLatency(null);
+                  setRightLatency(null);
+                  setExaMode("instant");
+                }}
+                disabled={leftLoading || rightLoading}
+                className={`p-1.5 rounded-lg border border-[#e5e5e5] bg-white text-[#60646c] transition-all hover:border-[#0040f0] hover:text-[#0040f0] ${
+                  leftLoading || rightLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                }`}
+                title="New conversation"
+              >
+                <RefreshCw size={12} />
+              </button>
+              <ModeDropdown mode={exaMode} onChange={setExaMode} disabled={rightLoading} />
+            </div>
+          </div>
+
+          <div ref={rightScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
+            <div className="max-w-2xl mx-auto space-y-4">
+              {rightMessages.map((msg, i) => (
+                <Message key={i} message={msg} />
+              ))}
+            </div>
+          </div>
+
+          <LatencyBar latency={rightLatency} side="right" />
+        </div>
+      </div>
+
+      {/* Bottom Input */}
+      <footer className="border-t border-[#e5e5e5] bg-white shrink-0">
+        <div className="max-w-2xl mx-auto px-6 py-3">
           <ChatInputBlue
             placeholder="Ask about anything on the web..."
-            tags={suggestions}
-            onSubmit={onSubmit}
-            disabled={disabled}
+            tags={DEFAULT_SUGGESTIONS}
+            onSubmit={handleSubmit}
+            disabled={leftLoading || rightLoading}
           />
         </div>
+      </footer>
+    </div>
+  );
+}
+
+// Mode dropdown: instant / fast / auto
+function ModeDropdown({ mode, onChange, disabled }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const modes = [
+    { value: "instant", label: "Instant" },
+    { value: "fast", label: "Fast" },
+    { value: "auto", label: "Auto" },
+  ];
+
+  const current = modes.find(m => m.value === mode) || modes[0];
+
+  // Close dropdown on outside click
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => !disabled && setOpen(!open)}
+        className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border border-[#e5e5e5] bg-white text-[11px] font-medium text-[#000911] transition-all hover:border-[#0040f0] ${
+          disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+        }`}
+      >
+        {current.label}
+        <ChevronDown size={12} className={`text-[#60646c] transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 min-w-[100px] rounded-lg border border-[#e5e5e5] bg-white shadow-lg py-1">
+          {modes.map(m => (
+            <button
+              key={m.value}
+              onClick={() => { onChange(m.value); setOpen(false); }}
+              className={`w-full text-left px-3 py-1.5 text-[12px] transition-colors ${
+                mode === m.value
+                  ? "font-semibold text-[#0040f0] bg-[#f0f4ff]"
+                  : "text-[#000911] hover:bg-[#fafafa]"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Latency bar styled like Exa highlight extension
+function LatencyBar({ latency, side }) {
+  if (!latency) return null;
+
+  if (side === "left") {
+    return (
+      <div className="flex items-center gap-2 px-4 h-10 bg-[#faf9f8] border-t border-[#e5e5e5] shrink-0">
+        <img src={cerebrasLogo} alt="" className="h-3.5 w-3.5" />
+        <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
+          Responded in <span className="text-[#0040f0] font-semibold">{latency.totalMs.toLocaleString()}ms</span>
+        </span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex items-center gap-3 px-4 h-10 bg-[#faf9f8] border-t border-[#e5e5e5] shrink-0">
+      <div className="flex items-center gap-1.5">
+        <img src={cerebrasLogo} alt="" className="h-3.5 w-3.5" />
+        <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
+          Tool Call: <span className="text-[#0040f0] font-semibold">{(latency.toolCallMs || 0).toLocaleString()}ms</span>
+        </span>
+      </div>
+      <span className="text-[#d4d4d4]">&middot;</span>
+      <div className="flex items-center gap-1.5">
+        <img src={exaLogomarkBlue} alt="" className="h-3.5 w-3.5" />
+        <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
+          Exa: <span className="text-[#0040f0] font-semibold">{(latency.exaMs || 0).toLocaleString()}ms</span>
+        </span>
+      </div>
+      <span className="text-[#d4d4d4]">&middot;</span>
+      <div className="flex items-center gap-1.5">
+        <img src={cerebrasLogo} alt="" className="h-3.5 w-3.5" />
+        <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
+          Synthesis: <span className="text-[#0040f0] font-semibold">{(latency.synthesisMs || 0).toLocaleString()}ms</span>
+        </span>
+      </div>
+      <span className="text-[#d4d4d4]">&middot;</span>
+      <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
+        Total: <span className="text-[#0040f0] font-semibold">{latency.totalMs.toLocaleString()}ms</span>
+      </span>
+    </div>
+  );
+}
+
+// Empty state with centered input and suggestion cards
+function EmptyState({ onSubmit, suggestions, disabled }) {
+  return (
+    <div className="w-full max-w-4xl mx-auto px-6">
+      <div className="rounded-2xl bg-[#fafafa] border border-[#f0f0f0] p-8">
+        <div className="mb-8 grid grid-cols-1 md:grid-cols-3 gap-4">
+          {SEARCH_NUDGES.map((nudge, i) => (
+            <button
+              key={i}
+              onClick={() => onSubmit(nudge.prompt)}
+              disabled={disabled}
+              className="group relative rounded-xl border border-[#e5e5e5] bg-white p-6 text-left transition-all hover:border-[#0040f0] hover:shadow-md disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <div className="mb-2 text-sm font-medium text-[#60646c]">{nudge.title}</div>
+              <div className="text-sm text-[#000911] group-hover:text-[#0040f0] transition-colors">
+                {nudge.prompt}
+              </div>
+            </button>
+          ))}
+        </div>
+
+        <ChatInputBlue
+          placeholder="Ask about anything on the web..."
+          tags={suggestions}
+          onSubmit={onSubmit}
+          disabled={disabled}
+        />
       </div>
     </div>
   );
 }
 
-// Extract domain name from URL (e.g., "cnbc" from "https://www.cnbc.com/...")
+// --- Display components ---
+
 function getDomain(url) {
   try {
     const hostname = new URL(url).hostname;
@@ -375,7 +501,6 @@ function getDomain(url) {
   }
 }
 
-// Search loading phrases
 const SEARCH_PHRASES = [
   "Seeking the highest quality knowledge...",
   "Investigating groundbreaking discoveries...",
@@ -390,20 +515,16 @@ const SEARCH_PHRASES = [
   "Venturing into the knowledge frontier...",
 ];
 
-// Get a random search phrase
 const getRandomSearchPhrase = () =>
   SEARCH_PHRASES[Math.floor(Math.random() * SEARCH_PHRASES.length)];
 
-// Gradient loader Lottie animation URL
 const LOADER_LOTTIE = "https://assets-v2.lottiefiles.com/a/ca974640-116b-11ee-9862-ff8858832394/c8bJzzfgZt.json";
 
 function LoadingRings({ searching = false, queries = [] }) {
-  // Pick a random phrase once when searching becomes true
   const [searchPhrase] = useState(getRandomSearchPhrase);
   const [animationData, setAnimationData] = useState(null);
   const displayText = searching ? searchPhrase : "Thinking...";
 
-  // Load Lottie animation
   useEffect(() => {
     fetch(LOADER_LOTTIE)
       .then(res => res.json())
@@ -411,7 +532,6 @@ function LoadingRings({ searching = false, queries = [] }) {
       .catch(err => console.error("Failed to load animation:", err));
   }, []);
 
-  // If we have queries, show them instead of generic loading text
   if (searching && queries && queries.length > 0) {
     return (
       <div className="animate-message-in space-y-3 max-w-[85%]">
@@ -443,7 +563,6 @@ function LoadingRings({ searching = false, queries = [] }) {
           )}
         </div>
         <div className="relative">
-          {/* Animated transparent bubble background */}
           <div className="absolute inset-0 -inset-x-3 -inset-y-2 rounded-full bg-white/60 backdrop-blur-sm animate-bubble-wave" />
           <span className="relative text-[13px] text-[#60646c] animate-text-flicker flex items-center gap-1.5">
             {displayText}
@@ -455,7 +574,6 @@ function LoadingRings({ searching = false, queries = [] }) {
   );
 }
 
-// Search Query Row component - shows Exa queries with expandable sources
 function SearchQueryRow({ query, category, sources = [] }) {
   const [expanded, setExpanded] = useState(false);
 
@@ -473,9 +591,27 @@ function SearchQueryRow({ query, category, sources = [] }) {
           </span>
         )}
         {sources.length > 0 && (
-          <span className="text-[11px] text-[#60646c]">
-            {sources.length} {sources.length === 1 ? 'source' : 'sources'}
-          </span>
+          <div className="flex items-center gap-1.5">
+            {/* Stacked favicons next to source count */}
+            <div className="flex items-center -space-x-1">
+              {sources.slice(0, 4).map((src, i) => {
+                let domain;
+                try { domain = new URL(src.url).hostname; } catch { return null; }
+                return (
+                  <img
+                    key={i}
+                    src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+                    alt=""
+                    className="h-3.5 w-3.5 rounded-full border border-white"
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                );
+              })}
+            </div>
+            <span className="text-[11px] text-[#60646c]">
+              {sources.length} {sources.length === 1 ? 'source' : 'sources'}
+            </span>
+          </div>
         )}
         {sources.length > 0 && (
           expanded ? (
@@ -508,8 +644,8 @@ function SearchQueryRow({ query, category, sources = [] }) {
                 </p>
                 <p className="text-[11px] text-[#60646c]">
                   <span className="font-medium text-[#0040f0]">{getDomain(source.url)}</span>
-                  {source.date && ` · ${source.date.slice(0, 10)}`}
-                  {source.author && ` · ${source.author}`}
+                  {source.date && ` \u00b7 ${source.date.slice(0, 10)}`}
+                  {source.author && ` \u00b7 ${source.author}`}
                 </p>
               </div>
             </a>
@@ -520,35 +656,64 @@ function SearchQueryRow({ query, category, sources = [] }) {
   );
 }
 
-// Message component
+// Flash banner - shows briefly when Exa returns results, vanishes when LLM content starts
+function SourcesFlashBanner({ searches, searchTimeMs, totalSources }) {
+  const total = totalSources || searches.reduce((acc, s) => acc + (s.sources || []).length, 0);
+  const allSources = searches.flatMap(s => (s.sources || []).map(src => ({ ...src, query: s.query })));
+
+  return (
+    <div className="rounded-lg border border-[#e5e5e5] bg-[#fafafa] overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <img src={exaLogomarkBlue} alt="Exa" className="h-3.5 w-3.5 shrink-0" />
+        <span className="text-[13px] font-medium text-[#000911] flex-1">
+          Exa found {total} source{total !== 1 ? "s" : ""} in{" "}
+          <span className="text-[#0040f0] font-semibold">{(searchTimeMs || 0).toLocaleString()}ms</span>
+        </span>
+        {/* Stacked favicons */}
+        <div className="flex items-center -space-x-1.5">
+          {allSources.slice(0, 5).map((src, i) => {
+            let domain;
+            try { domain = new URL(src.url).hostname; } catch { return null; }
+            return (
+              <img
+                key={i}
+                src={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`}
+                alt=""
+                className="h-4 w-4 rounded-full border border-white"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Message({ message }) {
-  const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
   const isUser = message.role === "user";
 
   const handleCopy = async () => {
-    // Strip out chart and followup blocks for cleaner copy
     const cleanContent = message.content
       .replace(/```chart[\s\S]*?```/g, '')
       .replace(/```followups[\s\S]*?```/g, '')
       .trim();
-
     await navigator.clipboard.writeText(cleanContent);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
   };
 
-  // Show "Thinking..." for initial loading
   if (message.streaming && !message.content && !message.queries && !message.searches) {
     return <LoadingRings searching={false} queries={[]} />;
   }
 
-  // Show "Searching for" with queries during search phase (before content arrives)
-  if (message.streaming && !message.content && message.queries && message.queries.length > 0) {
+  // Show searching state with query cards (before Exa returns)
+  if (message.streaming && !message.content && !message.searchesReady && message.queries && message.queries.length > 0) {
     return (
       <div className="animate-message-in">
         <div className="inline-flex flex-col gap-2 px-1 py-2">
-          <span className="text-[13px] text-[#60646c] mb-1">Searching for</span>
+          <span className="text-[13px] text-[#60646c] mb-1">Searching...</span>
           <div className="space-y-2">
             {message.queries.map((query, i) => (
               <div
@@ -565,10 +730,22 @@ function Message({ message }) {
     );
   }
 
+  // Flash sources banner when Exa returns (before LLM streaming starts) — vanishes once content arrives
+  if (message.searchesReady && message.searches && !message.content) {
+    return (
+      <div className="animate-message-in">
+        <SourcesFlashBanner searches={message.searches} searchTimeMs={message.searchTimeMs} totalSources={message.totalSources} />
+        <div className="mt-3">
+          <LoadingRings searching={false} queries={[]} />
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className={`animate-message-in ${isUser ? "flex justify-end" : ""}`}>
       <div
-        className={`relative max-w-[85%] rounded-[12px] ${
+        className={`group relative max-w-[95%] rounded-[12px] ${
           isUser
             ? "bg-[#000911] px-4 py-3 text-white"
             : message.error
@@ -576,7 +753,6 @@ function Message({ message }) {
               : "border border-[#e5e5e5] bg-white px-5 py-4 shadow-[var(--shadow-card)]"
         }`}
       >
-        {/* Copy button for assistant messages */}
         {!isUser && !message.streaming && (
           <button
             onClick={handleCopy}
@@ -593,7 +769,7 @@ function Message({ message }) {
           <>
             <MessageContent content={message.content} />
 
-            {/* Search queries at bottom - only show when complete */}
+            {/* Source rows at bottom (original format with favicons) */}
             {!message.streaming && message.searches && message.searches.length > 0 && (
               <div className="mt-4 border-t border-[#e5e5e5] pt-4">
                 {message.searches.map((search, i) => (
@@ -607,7 +783,6 @@ function Message({ message }) {
               </div>
             )}
 
-            {/* Exa badge */}
             {message.exaUsed && (
               <div className="mt-3 flex items-center gap-1.5 text-[11px] text-[#60646c]">
                 <Check size={12} className="text-[#0040f0]" />
@@ -622,7 +797,6 @@ function Message({ message }) {
   );
 }
 
-// Code block with copy button
 function CodeBlock({ code, language }) {
   const [copied, setCopied] = useState(false);
 
@@ -653,29 +827,29 @@ function CodeBlock({ code, language }) {
   );
 }
 
-// Message content with special formatting for "What Would've Been Wrong" and charts
 function MessageContent({ content }) {
-  // Extract chart data if present (complete block)
   const chartMatch = content.match(/```chart\s*\n?([\s\S]*?)\n?```/);
 
-  // Remove chart blocks, followup blocks, and partial blocks from display
   let textContent = content
-    .replace(/```chart\s*\n?[\s\S]*?\n?```/g, '') // complete chart blocks
-    .replace(/```followups\s*\n?[\s\S]*?\n?```/g, '') // complete followup blocks
-    .replace(/```chart[\s\S]*$/g, '') // partial chart blocks (still streaming)
-    .replace(/```followups[\s\S]*$/g, '') // partial followup blocks (still streaming)
+    .replace(/```chart\s*\n?[\s\S]*?\n?```/g, '')
+    .replace(/```followups\s*\n?[\s\S]*?\n?```/g, '')
+    .replace(/```chart[\s\S]*$/g, '')
+    .replace(/```followups[\s\S]*$/g, '')
+    .replace(/\n?followups\s*\[.*$/s, '')           // bare followups [...] at end
+    .replace(/\{\s*"name"\s*:\s*"web_search"[\s\S]*$/s, '')  // leaked tool call JSON
+    .replace(/```\s*\n?\s*```/g, '')               // empty code fences
+    .replace(/```\w*\s*\n?\s*$/g, '')              // trailing unclosed code fence
     .trim();
 
   let chartData = null;
   if (chartMatch) {
     try {
-      chartData = JSON.parse(chartMatch[1].trim());
-    } catch (e) {
-      // Chart JSON not yet complete, don't show error
-    }
+      const parsed = JSON.parse(chartMatch[1].trim());
+      // Only use chart data if it has required fields
+      if (parsed && parsed.labels && parsed.data) chartData = parsed;
+    } catch (e) {}
   }
 
-  // Check for the warning pattern
   const warningMatch = textContent.match(/WITHOUT SEARCH[:\s]*(.+?)(?=WITH SEARCH|$)/is);
   const correctMatch = textContent.match(/WITH SEARCH[:\s]*(.+?)$/is);
 
@@ -686,7 +860,6 @@ function MessageContent({ content }) {
       <div className="prose prose-sm max-w-none text-[14px] text-[#000911]">
         <ReactMarkdown>{beforeWarning}</ReactMarkdown>
 
-        {/* What Would've Been Wrong callout */}
         <div className="my-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
           <div className="mb-2 flex items-center gap-2">
             <AlertTriangle size={16} className="text-amber-600" />
@@ -719,7 +892,8 @@ function MessageContent({ content }) {
           code({ node, inline, className, children, ...props }) {
             const match = /language-(\w+)/.exec(className || '');
             const language = match ? match[1] : '';
-            const codeString = String(children).replace(/\n$/, '');
+            const codeString = String(children || '').replace(/\n$/, '');
+            if (!codeString || codeString === 'undefined') return null;
             return inline ? (
               <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]" {...props}>
                 {children}
@@ -740,11 +914,9 @@ function MessageContent({ content }) {
   );
 }
 
-// Chart renderer component
 function ChartRenderer({ data }) {
   const { type, title, labels, data: values } = data;
 
-  // Vibrant, distinct colors for pie/doughnut charts
   const pieColors = [
     'rgba(0, 64, 240, 0.85)',
     'rgba(16, 185, 129, 0.85)',
@@ -756,7 +928,6 @@ function ChartRenderer({ data }) {
     'rgba(132, 204, 22, 0.85)',
   ];
 
-  // Gradient-style single color for bar charts
   const barColor = 'rgba(0, 64, 240, 0.75)';
   const barHoverColor = 'rgba(0, 64, 240, 0.9)';
   const lineColor = 'rgba(0, 64, 240, 1)';
@@ -783,7 +954,6 @@ function ChartRenderer({ data }) {
     }],
   };
 
-  // Calculate smart y-axis bounds
   const maxValue = Math.max(...values);
   const minValue = Math.min(...values);
   const range = maxValue - minValue;
