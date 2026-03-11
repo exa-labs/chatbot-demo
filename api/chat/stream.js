@@ -8,7 +8,25 @@ const client = new OpenAI({
 
 const exa = new Exa(process.env.EXA_API_KEY);
 
-const DEFAULT_MODEL = "llama3.1-8b";
+// Retry wrapper for Cerebras API calls (handles 429 rate limits)
+async function withRetry(fn, maxRetries = 3) {
+  for (let attempt = 0; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (err) {
+      const is429 = err?.status === 429 || err?.statusCode === 429 || (err?.message && err.message.includes('429'));
+      if (is429 && attempt < maxRetries) {
+        const delay = Math.min(1000 * Math.pow(2, attempt), 8000);
+        console.log(`[Stream] 429 rate limit hit, retrying in ${delay}ms (attempt ${attempt + 1}/${maxRetries})`);
+        await new Promise(r => setTimeout(r, delay));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+const DEFAULT_MODEL = "gpt-oss-120b";
 
 /**
  * Attempt to parse a tool call from content text that the model output
@@ -388,7 +406,7 @@ export default async function handler(req, res) {
     // Fast path: direct streaming for non-Exa requests
     if (!exaEnabled) {
       const t0 = Date.now();
-      const stream = await client.chat.completions.create({ model, messages, stream: true });
+      const stream = await withRetry(() => client.chat.completions.create({ model, messages, stream: true }));
       let fullContent = "";
       for await (const chunk of stream) {
         const c = chunk.choices[0]?.delta?.content;
@@ -402,12 +420,12 @@ export default async function handler(req, res) {
 
     // Helper: stream a completion and extract tool calls + content
     async function streamAndParse() {
-      const s = await client.chat.completions.create({
+      const s = await withRetry(() => client.chat.completions.create({
         model,
         messages,
         tools: exaEnabled ? [getSearchTool()] : undefined,
         stream: true,
-      });
+      }));
 
       let tc = [];
       let buf = "";
@@ -569,7 +587,7 @@ export default async function handler(req, res) {
     }));
 
     const finalCallStart = Date.now();
-    const finalStream = await client.chat.completions.create({
+    const finalStream = await withRetry(() => client.chat.completions.create({
       model,
       messages: [
         ...messages,
@@ -577,7 +595,7 @@ export default async function handler(req, res) {
         ...toolMessages,
       ],
       stream: true,
-    });
+    }));
 
     // Collect the full final response, then clean and send
     let fullFinal = "";

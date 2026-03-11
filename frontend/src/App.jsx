@@ -62,7 +62,7 @@ async function streamPane({ message, history, exaEnabled, exaMode, assistantId, 
         history: truncatedHistory,
         exaEnabled,
         exaMode: exaEnabled ? exaMode : undefined,
-        model: "llama3.1-8b",
+        model: "gpt-oss-120b",
       }),
     });
 
@@ -254,7 +254,7 @@ function App() {
             <span className="text-sm text-[#60646c]">Powered by Cerebras inference</span>
             <img src={cerebrasLogo} alt="Cerebras" className="h-4 w-4" />
           </div>
-          <p className="text-sm text-[#9ca3af] mt-1">Model: llama3.1-8b &middot; Side-by-side comparison: with and without Exa search</p>
+          <p className="text-sm text-[#9ca3af] mt-1">Model: gpt-oss-120b &middot; Side-by-side comparison: with and without Exa search</p>
         </header>
         <main className="flex-1 flex items-center justify-center">
           <EmptyState onSubmit={handleSubmit} suggestions={DEFAULT_SUGGESTIONS} disabled={false} />
@@ -269,7 +269,7 @@ function App() {
       <header className="flex items-center gap-3 px-5 py-2.5 border-b border-[#e5e5e5] bg-white shrink-0">
         <img src={exaLogomarkBlue} alt="Exa" className="h-5 w-5" />
         <span className="text-base font-semibold text-[#000911]">Exa Chatbot Demo</span>
-        <span className="text-xs text-[#9ca3af]">Cerebras llama3.1-8b</span>
+        <span className="text-xs text-[#9ca3af]">Cerebras gpt-oss-120b</span>
       </header>
 
       {/* Split panes */}
