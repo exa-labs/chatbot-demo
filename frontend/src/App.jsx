@@ -429,9 +429,12 @@ function LatencyBar({ latency, side }) {
 
   return (
     <div className="flex items-center gap-3 px-4 h-10 bg-[#faf9f8] border-t border-[#e5e5e5] shrink-0">
-      <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
-        Tool Call: <span className="text-[#0040f0] font-semibold">{(latency.toolCallMs || 0).toLocaleString()}ms</span>
-      </span>
+      <div className="flex items-center gap-1.5">
+        <img src={cerebrasLogo} alt="" className="h-3.5 w-3.5" />
+        <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
+          Tool Call: <span className="text-[#0040f0] font-semibold">{(latency.toolCallMs || 0).toLocaleString()}ms</span>
+        </span>
+      </div>
       <span className="text-[#d4d4d4]">&middot;</span>
       <div className="flex items-center gap-1.5">
         <img src={exaLogomarkBlue} alt="" className="h-3.5 w-3.5" />
@@ -440,9 +443,12 @@ function LatencyBar({ latency, side }) {
         </span>
       </div>
       <span className="text-[#d4d4d4]">&middot;</span>
-      <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
-        Synthesis: <span className="text-[#0040f0] font-semibold">{(latency.synthesisMs || 0).toLocaleString()}ms</span>
-      </span>
+      <div className="flex items-center gap-1.5">
+        <img src={cerebrasLogo} alt="" className="h-3.5 w-3.5" />
+        <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
+          Synthesis: <span className="text-[#0040f0] font-semibold">{(latency.synthesisMs || 0).toLocaleString()}ms</span>
+        </span>
+      </div>
       <span className="text-[#d4d4d4]">&middot;</span>
       <span className="text-[13px] font-medium text-[#000911] tracking-[-0.01em]">
         Total: <span className="text-[#0040f0] font-semibold">{latency.totalMs.toLocaleString()}ms</span>
