@@ -249,14 +249,16 @@ When the user uses referential language, expand it:
 - "similar offerings" -> include the domain/category from context
 - "more about this" -> include the specific subject
 
-CATEGORIES - Use sparingly. Most queries should NOT use a category:
+CATEGORIES - RARELY use categories. Most queries should NOT use a category:
 - company: ONLY for "what does X company do" or company research
-- people: ONLY for biographical profiles of NON-PUBLIC figures (e.g., finding a specific professional's LinkedIn).
-  NEVER use "people" for public figures you already know (Elon Musk, Sam Altman, Ilya Sutskever, etc.)
-  NEVER use "people" for quotes, interviews, statements, news, or podcasts about/by someone
+- people: ALMOST NEVER USE THIS. Only for finding a specific non-public professional's LinkedIn profile.
+  NEVER use "people" for public figures, politicians, celebrities, executives, or anyone you already know about.
+  NEVER use "people" for quotes, interviews, statements, news, actions, policies, or podcasts about/by someone.
+  NEVER use "people" for questions about what someone did, said, or is doing — use a general search instead.
+  If you DO use "people" category, you MUST ALSO include a second search for the same query WITHOUT the people category.
 - research_paper: ONLY for academic papers or arxiv
 
-For everything else (news, sports, general questions, quotes from people, what someone said), DO NOT use a category. Exa's general search works best for most queries.
+For everything else (news, sports, general questions, people in the news, quotes, what someone said, politicians, leaders), DO NOT use a category. Exa's general search works best for most queries — including queries about people.
 
 RESPONSE STYLE - MATCH THE USER'S REQUEST:
 - "Tell me everything about X" -> Give a COMPREHENSIVE deep-dive with all available information
@@ -323,12 +325,12 @@ RESULT COUNT - Choose based on query complexity:
 - Normal query (news, what someone said, general info): numResults = 5
 - Complex query needing depth (research, comparisons, comprehensive analysis): use multiple searches with numResults = 5 each
 
-CATEGORIES - Use sparingly:
+CATEGORIES - RARELY use categories. Default to NO category:
 - company: ONLY for "what does X company do" or company research
-- people: ONLY for non-public figures (finding someone's LinkedIn). NEVER use for public figures, quotes, interviews, or news about someone
+- people: ALMOST NEVER. Only for finding a non-public professional's LinkedIn. NEVER for public figures, politicians, celebrities, or anyone famous. NEVER for news/quotes/actions about someone. If you use "people", you MUST also include the same query WITHOUT "people" category.
 - research_paper: ONLY for academic papers or arxiv
 
-For news, sports, general facts, current events, quotes, interviews, podcasts - DO NOT use a category.`,
+For news, sports, general facts, current events, quotes, interviews, podcasts, politicians, world leaders, celebrities - DO NOT use a category.`,
       parameters: {
         type: "object",
         properties: {
