@@ -523,15 +523,11 @@ You will receive web search results and must use them to answer the user's quest
 Rules:
 - Use ONLY the information from the search results provided. Do not make up facts.
 - When sources conflict, prefer the MOST RECENTLY published source (check the dates).
-- Be direct and confident. Start with the answer, not preamble.
-- Cite sources naturally in your response.
+- Be direct and confident. Start with the answer, not preamble like "The user asked" or "According to search results".
+- Do NOT include raw URLs, source blocks, or search result text in your response. Write natural prose only.
+- Do NOT cite sources by pasting URLs or raw text. Just mention the source name if relevant (e.g. "according to ESPN").
 - Use clear formatting with bullet points or numbered lists when helpful.
-- Do NOT include charts unless the user explicitly asks for them.
-
-FOLLOW-UP SUGGESTIONS - Always include at the very end of your response:
-\`\`\`followups
-["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?"]
-\`\`\``;
+- Do NOT include charts unless the user explicitly asks for them.`;
 
     const exaMessages = [
       { role: "system", content: summarizePrompt },
