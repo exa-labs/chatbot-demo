@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { Link } from "react-router-dom";
-import { Search, ChevronDown, ChevronUp, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight } from "lucide-react";
+import { Search, ChevronDown, ChevronUp, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight, RefreshCw } from "lucide-react";
 import { ToggleElevated, CardGalleryItem } from "./components";
 import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
 import { PageHeader } from "./components/PageHeader";
@@ -170,7 +170,7 @@ async function streamPane({ message, history, exaEnabled, exaMode, assistantId, 
 
 function App() {
   const [hasStarted, setHasStarted] = useState(false);
-  const [exaMode, setExaMode] = useState("instant");
+  const [exaMode, setExaMode] = useState("fast");
 
   // Left pane (without Exa)
   const [leftMessages, setLeftMessages] = useState([]);
@@ -305,7 +305,23 @@ function App() {
               <img src={exaLogomarkBlue} alt="Exa" className="h-3.5 w-3.5" />
               <span className="text-[13px] font-semibold text-[#000911]">With Exa</span>
             </div>
-            <ModeDropdown mode={exaMode} onChange={setExaMode} disabled={rightLoading} />
+            <div className="flex items-center gap-1.5">
+              <button
+                onClick={() => {
+                  if (rightLoading) return;
+                  const lastUserMsg = rightMessages.filter(m => m.role === 'user').pop();
+                  if (lastUserMsg) handleSubmit(lastUserMsg.content);
+                }}
+                disabled={rightLoading || rightMessages.length === 0}
+                className={`p-1.5 rounded-lg border border-[#e5e5e5] bg-white text-[#60646c] transition-all hover:border-[#0040f0] hover:text-[#0040f0] ${
+                  rightLoading || rightMessages.length === 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                }`}
+                title="Re-run search"
+              >
+                <RefreshCw size={12} />
+              </button>
+              <ModeDropdown mode={exaMode} onChange={setExaMode} disabled={rightLoading} />
+            </div>
           </div>
 
           <div ref={rightScrollRef} className="flex-1 overflow-y-auto px-4 py-4">
