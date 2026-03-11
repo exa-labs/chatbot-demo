@@ -308,15 +308,18 @@ function App() {
             <div className="flex items-center gap-1.5">
               <button
                 onClick={() => {
-                  if (rightLoading) return;
-                  const lastUserMsg = rightMessages.filter(m => m.role === 'user').pop();
-                  if (lastUserMsg) handleSubmit(lastUserMsg.content);
+                  if (leftLoading || rightLoading) return;
+                  setHasStarted(false);
+                  setLeftMessages([]);
+                  setRightMessages([]);
+                  setLeftLatency(null);
+                  setRightLatency(null);
                 }}
-                disabled={rightLoading || rightMessages.length === 0}
+                disabled={leftLoading || rightLoading}
                 className={`p-1.5 rounded-lg border border-[#e5e5e5] bg-white text-[#60646c] transition-all hover:border-[#0040f0] hover:text-[#0040f0] ${
-                  rightLoading || rightMessages.length === 0 ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                  leftLoading || rightLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
                 }`}
-                title="Re-run search"
+                title="New conversation"
               >
                 <RefreshCw size={12} />
               </button>
