@@ -1,10 +1,19 @@
 import OpenAI from "openai";
 import Exa from "exa-js";
 
-const client = new OpenAI({
+// Cerebras client for fast final response generation
+const cerebrasClient = new OpenAI({
   baseURL: "https://api.cerebras.ai/v1",
   apiKey: process.env.CEREBRAS_API_KEY || "csk-ctnvpnrpxw5t244c83c84pdecwk9tpfdp3jkvece9kve248x",
 });
+
+// OpenRouter client for fast tool call / query generation
+const routerClient = new OpenAI({
+  baseURL: "https://openrouter.ai/api/v1",
+  apiKey: process.env.OPEN_ROUTER_KEY,
+});
+
+const ROUTER_MODEL = "google/gemini-2.5-flash";
 
 const exa = new Exa(process.env.EXA_API_KEY);
 
@@ -403,10 +412,10 @@ export default async function handler(req, res) {
         .trimEnd();
     }
 
-    // Fast path: direct streaming for non-Exa requests
+    // Fast path: direct streaming for non-Exa requests (Cerebras only)
     if (!exaEnabled) {
       const t0 = Date.now();
-      const stream = await withRetry(() => client.chat.completions.create({ model, messages, stream: true }));
+      const stream = await withRetry(() => cerebrasClient.chat.completions.create({ model, messages, stream: true }));
       let fullContent = "";
       for await (const chunk of stream) {
         const c = chunk.choices[0]?.delta?.content;
@@ -418,13 +427,55 @@ export default async function handler(req, res) {
       return res.end();
     }
 
-    // Direct Exa path: skip LLM tool-call detection, search immediately with user query
-    // This cuts Cerebras API calls from 3-4 to just 1 on the Exa side
-    const allSearches = [{ query: message, numResults: 5 }];
+    // Exa path: OpenRouter (Gemini Flash) generates search queries → Exa search → Cerebras summarizes
+    // Step 1: Use OpenRouter with our full system prompt + tool definition to generate search queries
+    const queryGenStart = Date.now();
+    console.log(`[Stream] Generating search queries via OpenRouter (${ROUTER_MODEL})...`);
+    const routerResponse = await routerClient.chat.completions.create({
+      model: ROUTER_MODEL,
+      messages,
+      tools: [getSearchTool()],
+    });
 
+    const routerChoice = routerResponse.choices[0];
+    const toolCalls = routerChoice?.message?.tool_calls || [];
+    const queryGenMs = Date.now() - queryGenStart;
+    console.log(`[Stream] Query generation took ${queryGenMs}ms, got ${toolCalls.length} tool calls`);
+
+    // Extract searches from tool calls
+    const allSearches = [];
+    for (const toolCall of toolCalls) {
+      try {
+        const args = JSON.parse(toolCall.function.arguments);
+        let searches = args.searches;
+        if (typeof searches === 'string') {
+          try { searches = JSON.parse(searches); } catch (_) {}
+        }
+        if (searches && !Array.isArray(searches)) searches = [searches];
+        if (!searches && args.query) searches = [{ query: args.query, numResults: args.numResults }];
+        if (Array.isArray(searches)) {
+          const normalized = searches.map(s => {
+            if (typeof s === 'string' && s.trim()) return { query: s.trim() };
+            if (s && typeof s.query === 'string' && s.query.trim()) return s;
+            return null;
+          }).filter(Boolean);
+          allSearches.push(...normalized);
+        }
+      } catch (e) {
+        console.error("Failed to parse tool call arguments:", e.message);
+      }
+    }
+
+    // Fallback: if OpenRouter didn't generate tool calls, use user query directly
+    if (allSearches.length === 0) {
+      console.log("[Stream] No tool calls from OpenRouter, falling back to user query");
+      allSearches.push({ query: message, numResults: 5 });
+    }
+
+    // Step 2: Search Exa with the generated queries
     sendEvent("search_start", { queries: allSearches.map(s => s.query) });
 
-    console.log(`Searching: ${allSearches.map(s => `${s.query} (${s.numResults || 5} results)`).join(", ")}`);
+    console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 5} results)`).join(", ")}`);
     const searchStart = Date.now();
     const searchResults = await searchMultiple(allSearches, searchType);
     const searchTimeMs = Date.now() - searchStart;
@@ -462,7 +513,7 @@ export default async function handler(req, res) {
       })
       .join("\n\n");
 
-    // Build messages with search results injected as system context (no tool calls needed)
+    // Step 3: Cerebras generates the final response with search results as context
     const exaMessages = [
       { role: "system", content: getSystemPrompt(true) },
       ...recentHistory,
@@ -470,7 +521,7 @@ export default async function handler(req, res) {
     ];
 
     const finalCallStart = Date.now();
-    const finalStream = await withRetry(() => client.chat.completions.create({
+    const finalStream = await withRetry(() => cerebrasClient.chat.completions.create({
       model,
       messages: exaMessages,
       stream: true,
@@ -488,7 +539,7 @@ export default async function handler(req, res) {
     }
 
     const finalCallMs = Date.now() - finalCallStart;
-    sendEvent("done", { exaUsed: true, searchTimeMs, exaServerTimeMs, totalSources, initialCallMs: 0, finalCallMs });
+    sendEvent("done", { exaUsed: true, searchTimeMs, exaServerTimeMs, totalSources, initialCallMs: queryGenMs, finalCallMs });
     res.end();
 
   } catch (err) {
