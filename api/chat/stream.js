@@ -423,18 +423,18 @@ export default async function handler(req, res) {
       return res.end();
     }
 
-    // Exa path: OpenRouter (Gemini Flash) generates search queries → Exa search → Cerebras summarizes
-    // Step 1: Use OpenRouter with our full system prompt + tool definition to generate search queries
+    // Exa path: Cerebras generates search queries → Exa search → Cerebras summarizes
+    // Step 1: Use Cerebras with our full system prompt + tool definition to generate search queries
     const queryGenStart = Date.now();
-    console.log(`[Stream] Generating search queries via OpenRouter (${ROUTER_MODEL})...`);
-    const routerResponse = await routerClient.chat.completions.create({
-      model: ROUTER_MODEL,
+    console.log(`[Stream] Generating search queries via Cerebras (${model})...`);
+    const toolCallResponse = await withRetry(() => cerebrasClient.chat.completions.create({
+      model,
       messages,
       tools: [getSearchTool()],
-    });
+    }));
 
-    const routerChoice = routerResponse.choices[0];
-    const toolCalls = routerChoice?.message?.tool_calls || [];
+    const toolCallChoice = toolCallResponse.choices[0];
+    const toolCalls = toolCallChoice?.message?.tool_calls || [];
     const queryGenMs = Date.now() - queryGenStart;
     console.log(`[Stream] Query generation took ${queryGenMs}ms, got ${toolCalls.length} tool calls`);
 
@@ -462,9 +462,22 @@ export default async function handler(req, res) {
       }
     }
 
-    // Fallback: if OpenRouter didn't generate tool calls, use user query directly
+    // Fallback: if Cerebras didn't generate tool calls, try to extract from content text
+    if (allSearches.length === 0 && toolCallChoice?.message?.content) {
+      const extracted = tryExtractToolCallFromContent(toolCallChoice.message.content);
+      if (extracted && extracted.name === 'web_search') {
+        try {
+          const args = JSON.parse(extracted.arguments);
+          let searches = args.searches || (args.query ? [{ query: args.query, numResults: args.numResults }] : []);
+          if (typeof searches === 'string') try { searches = JSON.parse(searches); } catch (_) {}
+          if (Array.isArray(searches)) allSearches.push(...searches.filter(s => s && s.query));
+        } catch (_) {}
+      }
+    }
+
+    // Final fallback: use user query directly
     if (allSearches.length === 0) {
-      console.log("[Stream] No tool calls from OpenRouter, falling back to user query");
+      console.log("[Stream] No tool calls from Cerebras, falling back to user query");
       allSearches.push({ query: message, numResults: 5 });
     }
 
@@ -550,7 +563,7 @@ Rules:
     }
 
     const finalCallMs = Date.now() - finalCallStart;
-    sendEvent("done", { exaUsed: true, searchTimeMs, exaServerTimeMs, totalSources, initialCallMs: queryGenMs, finalCallMs });
+    sendEvent("done", { exaUsed: true, toolCallMs: queryGenMs, searchTimeMs, exaServerTimeMs, totalSources, synthesisMs: finalCallMs });
     res.end();
 
   } catch (err) {
