@@ -208,6 +208,16 @@ function App() {
               searches = data.searches;
               searchTimeMs = data.searchTimeMs;
               totalSources = data.totalSources;
+              // Show sources immediately when Exa returns (before LLM streaming starts)
+              if (batchTimeout) clearTimeout(batchTimeout);
+              flushContentBuffer();
+              setMessages((prev) =>
+                prev.map((msg) =>
+                  msg.id === assistantMessageId
+                    ? { ...msg, searching: false, searchesReady: true, searches: data.searches, totalSources: data.totalSources, searchTimeMs: data.searchTimeMs }
+                    : msg
+                )
+              );
             }
 
             if (data.exaUsed !== undefined) {
@@ -545,9 +555,26 @@ function SearchQueryRow({ query, category, sources = [] }) {
           </span>
         )}
         {sources.length > 0 && (
-          <span className="text-[11px] text-[#60646c]">
-            {sources.length} {sources.length === 1 ? 'source' : 'sources'}
-          </span>
+          <div className="flex items-center gap-1.5">
+            <div className="flex items-center -space-x-1">
+              {sources.slice(0, 4).map((src, i) => {
+                let domain;
+                try { domain = new URL(src.url).hostname; } catch { return null; }
+                return (
+                  <img
+                    key={i}
+                    src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+                    alt=""
+                    className="h-3.5 w-3.5 rounded-full border border-white"
+                    onError={(e) => { e.target.style.display = 'none'; }}
+                  />
+                );
+              })}
+            </div>
+            <span className="text-[11px] text-[#60646c]">
+              {sources.length} {sources.length === 1 ? 'source' : 'sources'}
+            </span>
+          </div>
         )}
         {sources.length > 0 && (
           expanded ? (
@@ -593,6 +620,38 @@ function SearchQueryRow({ query, category, sources = [] }) {
 }
 
 // Message component
+function SourcesFlashBanner({ searches, searchTimeMs, totalSources }) {
+  const total = totalSources || searches.reduce((acc, s) => acc + (s.sources || []).length, 0);
+  const allSources = searches.flatMap(s => (s.sources || []).map(src => ({ ...src, query: s.query })));
+
+  return (
+    <div className="rounded-lg border border-[#e5e5e5] bg-[#fafafa] overflow-hidden">
+      <div className="flex items-center gap-2 px-3 py-2">
+        <img src={exaLogomarkBlue} alt="Exa" className="h-3.5 w-3.5 shrink-0" />
+        <span className="text-[13px] font-medium text-[#000911] flex-1">
+          Exa found {total} source{total !== 1 ? "s" : ""} in{" "}
+          <span className="text-[#0040f0] font-semibold">{(searchTimeMs || 0).toLocaleString()}ms</span>
+        </span>
+        <div className="flex items-center -space-x-1.5">
+          {allSources.slice(0, 5).map((src, i) => {
+            let domain;
+            try { domain = new URL(src.url).hostname; } catch { return null; }
+            return (
+              <img
+                key={i}
+                src={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`}
+                alt=""
+                className="h-4 w-4 rounded-full border border-white"
+                onError={(e) => { e.target.style.display = 'none'; }}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function Message({ message }) {
   const [sourcesExpanded, setSourcesExpanded] = useState(false);
   const [copied, setCopied] = useState(false);
@@ -615,8 +674,8 @@ function Message({ message }) {
     return <LoadingRings searching={false} queries={[]} />;
   }
 
-  // Show "Searching for" with queries during search phase (before content arrives)
-  if (message.streaming && !message.content && message.queries && message.queries.length > 0) {
+  // Show "Searching for" with queries during search phase (before Exa returns)
+  if (message.streaming && !message.content && !message.searchesReady && message.queries && message.queries.length > 0) {
     return (
       <div className="animate-message-in">
         <div className="inline-flex flex-col gap-2 px-1 py-2">
@@ -632,6 +691,18 @@ function Message({ message }) {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Flash sources banner when Exa returns but LLM hasn't started streaming yet
+  if (message.searchesReady && message.searches && !message.content) {
+    return (
+      <div className="animate-message-in">
+        <SourcesFlashBanner searches={message.searches} searchTimeMs={message.searchTimeMs} totalSources={message.totalSources} />
+        <div className="mt-3">
+          <LoadingRings searching={false} queries={[]} />
         </div>
       </div>
     );
