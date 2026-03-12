@@ -23,13 +23,13 @@ function getStartDate(maxAgeHours) {
   return date.toISOString();
 }
 
-async function searchExa(query, category, maxAgeOverride, numResults = 5) {
+async function searchExa(query, category, maxAgeOverride, numResults = 5, searchType = "auto") {
   const searchParams = {
     numResults: Math.min(50, Math.max(3, numResults)),
     highlights: {
       maxCharacters: 4000,
     },
-    type: "auto",
+    type: searchType,
   };
 
   if (category) {
@@ -57,11 +57,11 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5) {
   }));
 }
 
-async function searchMultiple(searches) {
+async function searchMultiple(searches, searchType = "auto") {
   const searchPromises = searches.map(async ({ query, category, maxAgeOverride, numResults = 5 }) => {
     const startTime = Date.now();
     try {
-      const results = await searchExa(query, category, maxAgeOverride, numResults);
+      const results = await searchExa(query, category, maxAgeOverride, numResults, searchType);
       const timeMs = Date.now() - startTime;
       return { query, category, results, timeMs };
     } catch (err) {
@@ -299,8 +299,8 @@ export default async function handler(req, res) {
   };
 
   try {
-    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
-    console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}`);
+    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL, searchType = "auto" } = req.body;
+    console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}, searchType: ${searchType}`);
 
     const recentHistory = history.slice(-20).map(msg => ({
       role: msg.role,
@@ -389,10 +389,10 @@ export default async function handler(req, res) {
 
     console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 5} results)`).join(", ")}`);
     const searchStart = Date.now();
-    const searchResults = await searchMultiple(allSearches);
+    const searchResults = await searchMultiple(allSearches, searchType);
     const searchTimeMs = Date.now() - searchStart;
     const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
-    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms`);
+    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms (type: ${searchType})`);
 
     sendEvent("search_complete", {
       searchTimeMs,

@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 import { Link } from "react-router-dom";
-import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight } from "lucide-react";
+import { Search, ChevronDown, ChevronRight, AlertTriangle, Check, ExternalLink, Copy, ArrowRight, RefreshCw } from "lucide-react";
 import { ToggleElevated, CardGalleryItem } from "./components";
 import { ChatInputBlue, SuggestionTag } from "./components/ChatInput";
 import { PageHeader } from "./components/PageHeader";
@@ -34,6 +34,7 @@ function App() {
   const [exaEnabled, setExaEnabled] = useState(true);
   const [followups, setFollowups] = useState([]);
   const [model, setModel] = useState("google/gemini-2.5-flash");
+  const [searchType, setSearchType] = useState("auto");
   const messagesEndRef = useRef(null);
 
   const currentChat = chats.find(c => c.id === currentChatId) || chats[0];
@@ -124,6 +125,7 @@ function App() {
           history: messages,
           exaEnabled,
           model,
+          searchType,
         }),
       });
 
@@ -264,17 +266,35 @@ function App() {
         title="Exa Chatbot Demo"
         subtitle="AI chatbot with real-time web search powered by Exa"
         rightContent={
-          <Link to="/tutorial">
-            <Button
-              variant="default"
-              size="sm"
-              icon={ArrowRight}
-              iconPosition="end"
-              className="w-[140px] justify-between"
-            >
-              How It Works
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2">
+            {messages.length > 0 && (
+              <button
+                onClick={() => {
+                  if (isLoading) return;
+                  createNewChat();
+                }}
+                disabled={isLoading}
+                className={`p-2 rounded-lg border border-[#e5e5e5] bg-white text-[#60646c] transition-all hover:border-[#0040f0] hover:text-[#0040f0] ${
+                  isLoading ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'
+                }`}
+                title="New conversation"
+              >
+                <RefreshCw size={14} />
+              </button>
+            )}
+            <SearchTypeDropdown mode={searchType} onChange={setSearchType} disabled={isLoading} />
+            <Link to="/tutorial">
+              <Button
+                variant="default"
+                size="sm"
+                icon={ArrowRight}
+                iconPosition="end"
+                className="w-[140px] justify-between"
+              >
+                How It Works
+              </Button>
+            </Link>
+          </div>
         }
       />
 
@@ -360,6 +380,58 @@ function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
           />
         </div>
       </div>
+    </div>
+  );
+}
+
+// Search type dropdown: auto / fast / instant
+function SearchTypeDropdown({ mode, onChange, disabled }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const modes = [
+    { value: "auto", label: "Auto" },
+    { value: "fast", label: "Fast" },
+    { value: "instant", label: "Instant" },
+  ];
+
+  const current = modes.find(m => m.value === mode) || modes[0];
+
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (ref.current && !ref.current.contains(e.target)) setOpen(false);
+    };
+    if (open) document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  return (
+    <div ref={ref} className="relative">
+      <button
+        onClick={() => !disabled && setOpen(!open)}
+        className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-[#e5e5e5] bg-white text-[12px] font-medium text-[#000911] transition-all hover:border-[#0040f0] ${
+          disabled ? "opacity-50 cursor-not-allowed" : "cursor-pointer"
+        }`}
+      >
+        {current.label}
+        <ChevronDown size={12} className={`text-[#60646c] transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+      {open && (
+        <div className="absolute right-0 top-full mt-1 z-50 min-w-[100px] rounded-lg border border-[#e5e5e5] bg-white shadow-lg py-1">
+          {modes.map(m => (
+            <button
+              key={m.value}
+              onClick={() => { onChange(m.value); setOpen(false); }}
+              className={`w-full text-left px-3 py-1.5 text-[12px] transition-colors ${
+                mode === m.value
+                  ? "font-semibold text-[#0040f0] bg-[#f0f4ff]"
+                  : "text-[#000911] hover:bg-[#fafafa]"
+              }`}
+            >
+              {m.label}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

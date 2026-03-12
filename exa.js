@@ -5,13 +5,13 @@ const exa = new Exa(process.env.EXA_API_KEY);
 /**
  * Search the web via Exa
  */
-export async function searchExa(query, category, numResults = 5) {
+export async function searchExa(query, category, numResults = 5, searchType = "auto") {
   const searchParams = {
     numResults: Math.min(50, Math.max(3, numResults)),
     highlights: {
       maxCharacters: 4000,
     },
-    type: "auto",
+    type: searchType,
   };
 
   if (category) {
@@ -37,24 +37,24 @@ export async function searchExa(query, category, numResults = 5) {
 let lastRequestTime = 0;
 const MIN_REQUEST_INTERVAL = 250;
 
-async function rateLimitedSearch(query, category, numResults) {
+async function rateLimitedSearch(query, category, numResults, searchType) {
   const now = Date.now();
   const timeSinceLastRequest = now - lastRequestTime;
   if (timeSinceLastRequest < MIN_REQUEST_INTERVAL) {
     await new Promise(resolve => setTimeout(resolve, MIN_REQUEST_INTERVAL - timeSinceLastRequest));
   }
   lastRequestTime = Date.now();
-  return searchExa(query, category, numResults);
+  return searchExa(query, category, numResults, searchType);
 }
 
 /**
  * Run multiple searches in parallel for faster results
  */
-export async function searchMultiple(searches) {
+export async function searchMultiple(searches, searchType = "auto") {
   const searchPromises = searches.map(async ({ query, category, numResults = 5 }) => {
     const startTime = Date.now();
     try {
-      const results = await searchExa(query, category, numResults);
+      const results = await searchExa(query, category, numResults, searchType);
       const timeMs = Date.now() - startTime;
       return { query, category, results, timeMs };
     } catch (err) {
