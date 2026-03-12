@@ -557,7 +557,7 @@ function SearchQueryRow({ query, category, sources = [] }) {
         {sources.length > 0 && (
           <div className="flex items-center gap-1.5">
             <div className="flex items-center -space-x-1">
-              {sources.slice(0, 4).map((src, i) => {
+              {sources.slice(0, 5).map((src, i) => {
                 let domain;
                 try { domain = new URL(src.url).hostname; } catch { return null; }
                 return (
