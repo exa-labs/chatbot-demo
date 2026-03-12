@@ -33,7 +33,7 @@ RESULT COUNT:
 
 CATEGORIES - Use sparingly:
 - company: ONLY for "what does X company do" or company research
-- people: ONLY for non-public figures (finding someone's LinkedIn). NEVER use for public figures, quotes, interviews, or news about someone
+- people: RARELY use this. Only for finding biographical info on non-public figures (e.g. someone's LinkedIn). NEVER for public figures, quotes, interviews, or news. When you DO use people category, you MUST also include a second search with the same query but WITHOUT the people category, so you get both profile and general web results.
 - research_paper: ONLY for academic papers or arxiv
 
 For news, sports, general facts, current events, quotes, interviews, podcasts - DO NOT use a category.`,
@@ -77,8 +77,8 @@ app.post("/api/chat/stream", async (req, res) => {
   };
 
   try {
-    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
-    console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}`);
+    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL, searchType = "auto" } = req.body;
+    console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}, searchType: ${searchType}`);
 
     const recentHistory = history.slice(-20).map(msg => ({
       role: msg.role,
@@ -179,10 +179,10 @@ app.post("/api/chat/stream", async (req, res) => {
 
     console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 10} results)`).join(", ")}`);
     const searchStart = Date.now();
-    const searchResults = await searchMultiple(allSearches);
+    const searchResults = await searchMultiple(allSearches, searchType);
     const searchTimeMs = Date.now() - searchStart;
     const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
-    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms`);
+    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms (type: ${searchType})`);
 
     // Send search complete event
     sendEvent("search_complete", {
@@ -252,7 +252,7 @@ app.post("/api/chat/stream", async (req, res) => {
 // Non-streaming endpoint (kept for compatibility)
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
+    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL, searchType = "auto" } = req.body;
 
     const recentHistory = history.slice(-20).map(msg => ({
       role: msg.role,
@@ -309,7 +309,7 @@ app.post("/api/chat", async (req, res) => {
 
     console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 10} results)`).join(", ")}`);
     const searchStart = Date.now();
-    const searchResults = await searchMultiple(allSearches);
+    const searchResults = await searchMultiple(allSearches, searchType);
     const searchTimeMs = Date.now() - searchStart;
     const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
     console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms`);

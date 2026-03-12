@@ -100,9 +100,10 @@ The user assumes you remember what you're talking about. Your queries should ref
 
 CATEGORIES - Use sparingly. Most queries should NOT use a category:
 - company: ONLY for "what does X company do" or company research
-- people: ONLY for biographical profiles of NON-PUBLIC figures (e.g., finding a specific professional's LinkedIn).
+- people: RARELY use this. Only for biographical profiles of NON-PUBLIC figures (e.g., finding a specific professional's LinkedIn).
   NEVER use "people" for public figures you already know (Elon Musk, Sam Altman, Ilya Sutskever, etc.)
   NEVER use "people" for quotes, interviews, statements, news, or podcasts about/by someone
+  IMPORTANT: When you DO use the "people" category, you MUST also run a SECOND search with the SAME query but WITHOUT the people category. This ensures you get both profile results and general web results.
 - research_paper: ONLY for academic papers or arxiv
 
 For everything else (news, sports, general questions, quotes from people, what someone said), DO NOT use a category. Exa's general search works best for most queries.

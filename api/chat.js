@@ -10,36 +10,17 @@ const exa = new Exa(process.env.EXA_API_KEY);
 
 const DEFAULT_MODEL = "google/gemini-2.5-flash";
 
-const freshnessDefaults = {
-  tweet: 48,
-  research_paper: 4320,
-  default: 336
-};
-
-const noDateFilterCategories = new Set(["company", "people"]);
-
-function getStartDate(maxAgeHours) {
-  const date = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
-  return date.toISOString();
-}
-
-async function searchExa(query, category, maxAgeOverride, numResults = 5) {
+async function searchExa(query, category, numResults = 5, searchType = "auto") {
   const searchParams = {
     numResults: Math.min(50, Math.max(3, numResults)),
     highlights: {
       maxCharacters: 4000,
     },
-    type: "auto",
+    type: searchType,
   };
 
   if (category) {
     searchParams.category = category;
-  }
-
-  if (!category || !noDateFilterCategories.has(category)) {
-    const defaultMaxAge = category ? (freshnessDefaults[category] || freshnessDefaults.default) : freshnessDefaults.default;
-    const maxAgeHours = maxAgeOverride && maxAgeOverride < defaultMaxAge ? maxAgeOverride : defaultMaxAge;
-    searchParams.startPublishedDate = getStartDate(maxAgeHours);
   }
 
   const response = await exa.searchAndContents(query, searchParams);
@@ -57,11 +38,11 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5) {
   }));
 }
 
-async function searchMultiple(searches) {
-  const searchPromises = searches.map(async ({ query, category, maxAgeOverride, numResults = 5 }) => {
+async function searchMultiple(searches, searchType = "auto") {
+  const searchPromises = searches.map(async ({ query, category, numResults = 5 }) => {
     const startTime = Date.now();
     try {
-      const results = await searchExa(query, category, maxAgeOverride, numResults);
+      const results = await searchExa(query, category, numResults, searchType);
       const timeMs = Date.now() - startTime;
       return { query, category, results, timeMs };
     } catch (err) {
@@ -204,7 +185,7 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL } = req.body;
+    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL, searchType = "auto" } = req.body;
 
     const recentHistory = history.slice(-20).map(msg => ({
       role: msg.role,
@@ -260,10 +241,10 @@ export default async function handler(req, res) {
 
     console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 5} results)`).join(", ")}`);
     const searchStart = Date.now();
-    const searchResults = await searchMultiple(allSearches);
+    const searchResults = await searchMultiple(allSearches, searchType);
     const searchTimeMs = Date.now() - searchStart;
     const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
-    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms`);
+    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms (type: ${searchType})`);
 
     const resultsText = searchResults
       .map(({ query, category, results }) => {
