@@ -10,20 +10,7 @@ const exa = new Exa(process.env.EXA_API_KEY);
 
 const DEFAULT_MODEL = "google/gemini-2.5-flash";
 
-const freshnessDefaults = {
-  tweet: 48,
-  research_paper: 4320,
-  default: 336
-};
-
-const noDateFilterCategories = new Set(["company", "people"]);
-
-function getStartDate(maxAgeHours) {
-  const date = new Date(Date.now() - maxAgeHours * 60 * 60 * 1000);
-  return date.toISOString();
-}
-
-async function searchExa(query, category, maxAgeOverride, numResults = 5, searchType = "auto") {
+async function searchExa(query, category, numResults = 5, searchType = "auto") {
   const searchParams = {
     numResults: Math.min(50, Math.max(3, numResults)),
     highlights: {
@@ -34,12 +21,6 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5, search
 
   if (category) {
     searchParams.category = category;
-  }
-
-  if (!category || !noDateFilterCategories.has(category)) {
-    const defaultMaxAge = category ? (freshnessDefaults[category] || freshnessDefaults.default) : freshnessDefaults.default;
-    const maxAgeHours = maxAgeOverride && maxAgeOverride < defaultMaxAge ? maxAgeOverride : defaultMaxAge;
-    searchParams.startPublishedDate = getStartDate(maxAgeHours);
   }
 
   const response = await exa.searchAndContents(query, searchParams);
@@ -58,10 +39,10 @@ async function searchExa(query, category, maxAgeOverride, numResults = 5, search
 }
 
 async function searchMultiple(searches, searchType = "auto") {
-  const searchPromises = searches.map(async ({ query, category, maxAgeOverride, numResults = 5 }) => {
+  const searchPromises = searches.map(async ({ query, category, numResults = 5 }) => {
     const startTime = Date.now();
     try {
-      const results = await searchExa(query, category, maxAgeOverride, numResults, searchType);
+      const results = await searchExa(query, category, numResults, searchType);
       const timeMs = Date.now() - startTime;
       return { query, category, results, timeMs };
     } catch (err) {
