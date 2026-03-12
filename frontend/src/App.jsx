@@ -620,34 +620,15 @@ function SearchQueryRow({ query, category, sources = [] }) {
 }
 
 // Message component
-function SourcesFlashBanner({ searches, searchTimeMs, totalSources }) {
+function SourcesFlashBanner({ searches, totalSources }) {
   const total = totalSources || searches.reduce((acc, s) => acc + (s.sources || []).length, 0);
-  const allSources = searches.flatMap(s => (s.sources || []).map(src => ({ ...src, query: s.query })));
 
   return (
-    <div className="rounded-lg border border-[#e5e5e5] bg-[#fafafa] overflow-hidden">
-      <div className="flex items-center gap-2 px-3 py-2">
-        <img src={exaLogomarkBlue} alt="Exa" className="h-3.5 w-3.5 shrink-0" />
-        <span className="text-[13px] font-medium text-[#000911] flex-1">
-          Exa found {total} source{total !== 1 ? "s" : ""} in{" "}
-          <span className="text-[#0040f0] font-semibold">{(searchTimeMs || 0).toLocaleString()}ms</span>
-        </span>
-        <div className="flex items-center -space-x-1.5">
-          {allSources.slice(0, 5).map((src, i) => {
-            let domain;
-            try { domain = new URL(src.url).hostname; } catch { return null; }
-            return (
-              <img
-                key={i}
-                src={`https://www.google.com/s2/favicons?domain=${domain}&sz=128`}
-                alt=""
-                className="h-4 w-4 rounded-full border border-white"
-                onError={(e) => { e.target.style.display = 'none'; }}
-              />
-            );
-          })}
-        </div>
-      </div>
+    <div className="flex items-center gap-2 px-3 py-2">
+      <img src={exaLogomarkBlue} alt="Exa" className="h-3.5 w-3.5 shrink-0" />
+      <span className="text-[13px] font-medium text-[#000911]">
+        Found {total} source{total !== 1 ? "s" : ""}
+      </span>
     </div>
   );
 }
