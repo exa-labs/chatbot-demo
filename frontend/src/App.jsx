@@ -702,7 +702,7 @@ function Message({ message }) {
           isUser
             ? "bg-[#000911] px-4 py-3 text-white"
             : message.error
-              ? "border border-[#e5e5e5] bg-[#fafafa] px-5 py-4"
+              ? "border border-orange-200 bg-orange-50 px-5 py-4"
               : "border border-[#e5e5e5] bg-white px-5 py-4 shadow-[var(--shadow-card)]"
         }`}
       >
