@@ -179,7 +179,13 @@ function App() {
             continue;
           }
           if (line.startsWith("data: ")) {
-            const data = JSON.parse(line.slice(6));
+            let data;
+            try {
+              data = JSON.parse(line.slice(6));
+            } catch (_parseErr) {
+              console.warn("Failed to parse SSE data:", line.slice(6));
+              continue;
+            }
 
             // Handle search_start - mark message as searching and save queries
             if (data.queries) {

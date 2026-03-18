@@ -266,6 +266,48 @@ For news, sports, general facts, current events, quotes, interviews, podcasts - 
   };
 };
 
+/** Map raw SDK/provider errors to user-friendly messages. */
+function friendlyError(msg) {
+  if (/JSON error injected into SSE stream/i.test(msg)) {
+    return "The AI model returned an invalid response. Please try again.";
+  }
+  if (/timeout|ETIMEDOUT|ECONNRESET/i.test(msg)) {
+    return "The request timed out. Please try again.";
+  }
+  if (/rate limit|429/i.test(msg)) {
+    return "Rate limited — please wait a moment and try again.";
+  }
+  if (/5\d{2}|server error|internal error/i.test(msg)) {
+    return "The AI service encountered an error. Please try again.";
+  }
+  return msg;
+}
+
+/**
+ * Iterate an OpenAI streaming response, invoking `onChunk` for each chunk.
+ * On transient SSE errors, retries once by calling `createStream` again.
+ */
+async function consumeStreamWithRetry(createStream, onChunk, { maxRetries = 1 } = {}) {
+  let attempts = 0;
+  while (true) {
+    try {
+      const stream = await createStream();
+      for await (const chunk of stream) {
+        onChunk(chunk);
+      }
+      return; // success
+    } catch (err) {
+      attempts++;
+      const isRetryable = /JSON error injected into SSE stream|ECONNRESET|ETIMEDOUT|socket hang up/i.test(err.message);
+      if (isRetryable && attempts <= maxRetries) {
+        console.warn(`[Stream] Retryable error (attempt ${attempts}/${maxRetries + 1}): ${err.message}`);
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
 export default async function handler(req, res) {
   if (req.method !== 'POST') {
     return res.status(405).json({ error: 'Method not allowed' });
@@ -294,37 +336,38 @@ export default async function handler(req, res) {
       { role: "user", content: message },
     ];
 
-    const stream = await client.chat.completions.create({
-      model,
-      messages,
-      tools: exaEnabled ? [getSearchTool()] : undefined,
-      stream: true,
-    });
-
     let toolCalls = [];
     let contentBuffer = "";
     let assistantMessage = { role: "assistant", content: null, tool_calls: null };
 
-    for await (const chunk of stream) {
-      const delta = chunk.choices[0]?.delta;
+    await consumeStreamWithRetry(
+      () => client.chat.completions.create({
+        model,
+        messages,
+        tools: exaEnabled ? [getSearchTool()] : undefined,
+        stream: true,
+      }),
+      (chunk) => {
+        const delta = chunk.choices[0]?.delta;
 
-      if (delta?.content) {
-        contentBuffer += delta.content;
-        sendEvent("content", { content: delta.content });
-      }
+        if (delta?.content) {
+          contentBuffer += delta.content;
+          sendEvent("content", { content: delta.content });
+        }
 
-      if (delta?.tool_calls) {
-        for (const tc of delta.tool_calls) {
-          const idx = tc.index;
-          if (!toolCalls[idx]) {
-            toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index;
+            if (!toolCalls[idx]) {
+              toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
+            }
+            if (tc.id) toolCalls[idx].id = tc.id;
+            if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
+            if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
           }
-          if (tc.id) toolCalls[idx].id = tc.id;
-          if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
-          if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
         }
       }
-    }
+    );
 
     if (toolCalls.length === 0) {
       sendEvent("done", { exaUsed: false });
@@ -410,29 +453,30 @@ export default async function handler(req, res) {
       content: resultsText,
     }));
 
-    const finalStream = await client.chat.completions.create({
-      model,
-      messages: [
-        ...messages,
-        assistantMessage,
-        ...toolMessages,
-      ],
-      stream: true,
-    });
-
-    for await (const chunk of finalStream) {
-      const content = chunk.choices[0]?.delta?.content;
-      if (content) {
-        sendEvent("content", { content });
+    await consumeStreamWithRetry(
+      () => client.chat.completions.create({
+        model,
+        messages: [
+          ...messages,
+          assistantMessage,
+          ...toolMessages,
+        ],
+        stream: true,
+      }),
+      (chunk) => {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          sendEvent("content", { content });
+        }
       }
-    }
+    );
 
     sendEvent("done", { exaUsed: true, searchTimeMs, totalSources });
     res.end();
 
   } catch (err) {
-    console.error(err);
-    sendEvent("error", { error: err.message });
+    console.error("[Stream] Error:", err.message);
+    sendEvent("error", { error: friendlyError(err.message) });
     res.end();
   }
 }
