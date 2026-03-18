@@ -287,7 +287,7 @@ function friendlyError(msg) {
  * Iterate an OpenAI streaming response, invoking `onChunk` for each chunk.
  * On transient SSE errors, retries once by calling `createStream` again.
  */
-async function consumeStreamWithRetry(createStream, onChunk, { maxRetries = 1 } = {}) {
+async function consumeStreamWithRetry(createStream, onChunk, { maxRetries = 1, onRetry } = {}) {
   let attempts = 0;
   while (true) {
     try {
@@ -301,6 +301,7 @@ async function consumeStreamWithRetry(createStream, onChunk, { maxRetries = 1 } 
       const isRetryable = /JSON error injected into SSE stream|ECONNRESET|ETIMEDOUT|socket hang up/i.test(err.message);
       if (isRetryable && attempts <= maxRetries) {
         console.warn(`[Stream] Retryable error (attempt ${attempts}/${maxRetries + 1}): ${err.message}`);
+        if (onRetry) onRetry();
         continue;
       }
       throw err;
@@ -366,7 +367,8 @@ export default async function handler(req, res) {
             if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
           }
         }
-      }
+      },
+      { onRetry: () => { toolCalls = []; contentBuffer = ""; } }
     );
 
     if (toolCalls.length === 0) {
