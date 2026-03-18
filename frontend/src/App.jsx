@@ -262,7 +262,7 @@ function App() {
       setMessages((prev) =>
         prev.map((msg) =>
           msg.id === assistantMessageId
-            ? { ...msg, content: `Error: ${error.message}`, error: true, streaming: false }
+            ? { ...msg, content: "Something went wrong — please refresh and try again.", error: true, streaming: false }
             : msg
         )
       );
@@ -702,7 +702,7 @@ function Message({ message }) {
           isUser
             ? "bg-[#000911] px-4 py-3 text-white"
             : message.error
-              ? "border border-red-200 bg-red-50 px-5 py-4"
+              ? "border border-[#e5e5e5] bg-[#fafafa] px-5 py-4"
               : "border border-[#e5e5e5] bg-white px-5 py-4 shadow-[var(--shadow-card)]"
         }`}
       >
