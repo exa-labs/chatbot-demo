@@ -20,11 +20,11 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointEleme
 
 // Default suggestion tags - defined outside component to prevent recreation
 const DEFAULT_SUGGESTIONS = [
-  "What's trending in tech today?",
-  "What are the top AI startups in 2026?",
-  "What did Elon Musk say this week?",
-  "Find recent research on AGI safety",
-  "What's the current Bitcoin price?",
+  "What are the current federal income tax brackets?",
+  "Recent IRS guidance on cryptocurrency taxation",
+  "What's new in state sales tax regulations?",
+  "Latest developments in international tax treaties",
+  "Current estate tax exemption limits",
 ];
 
 function App() {
@@ -34,7 +34,7 @@ function App() {
   const [exaEnabled, setExaEnabled] = useState(true);
   const [followups, setFollowups] = useState([]);
   const [model, setModel] = useState("google/gemini-2.5-flash");
-  const [searchType, setSearchType] = useState("auto");
+  const searchType = "auto";
   const messagesEndRef = useRef(null);
 
   const currentChat = chats.find(c => c.id === currentChatId) || chats[0];
@@ -140,6 +140,9 @@ function App() {
       let exaUsed = false;
       let searchTimeMs = null;
       let totalSources = null;
+      let discoverySources = null;
+      let narrowedSources = null;
+      let livecrawledSources = null;
 
       // Batching for smoother streaming
       let contentBuffer = "";
@@ -214,13 +217,16 @@ function App() {
               searches = data.searches;
               searchTimeMs = data.searchTimeMs;
               totalSources = data.totalSources;
+              if (data.discoverySources) discoverySources = data.discoverySources;
+              if (data.narrowedSources) narrowedSources = data.narrowedSources;
+              if (data.livecrawledSources) livecrawledSources = data.livecrawledSources;
               // Show sources immediately when Exa returns (before LLM streaming starts)
               if (batchTimeout) clearTimeout(batchTimeout);
               flushContentBuffer();
               setMessages((prev) =>
                 prev.map((msg) =>
                   msg.id === assistantMessageId
-                    ? { ...msg, searching: false, searchesReady: true, searches: data.searches, totalSources: data.totalSources, searchTimeMs: data.searchTimeMs }
+                    ? { ...msg, searching: false, searchesReady: true, searches: data.searches, totalSources: data.totalSources, searchTimeMs: data.searchTimeMs, discoverySources: data.discoverySources, narrowedSources: data.narrowedSources, livecrawledSources: data.livecrawledSources }
                     : msg
                 )
               );
@@ -228,6 +234,9 @@ function App() {
 
             if (data.exaUsed !== undefined) {
               exaUsed = data.exaUsed;
+              if (data.discoverySources) discoverySources = data.discoverySources;
+              if (data.narrowedSources) narrowedSources = data.narrowedSources;
+              if (data.livecrawledSources) livecrawledSources = data.livecrawledSources;
             }
 
             if (data.error) {
@@ -251,7 +260,7 @@ function App() {
                 // Failed to parse followups
               }
             }
-            return { ...msg, streaming: false, searches, exaUsed, searchTimeMs, totalSources };
+            return { ...msg, streaming: false, searches, exaUsed, searchTimeMs, totalSources, discoverySources, narrowedSources, livecrawledSources };
           }
           return msg;
         });
@@ -279,8 +288,8 @@ function App() {
       )}
 
       <PageHeader
-        title="Exa Chatbot Demo"
-        subtitle="AI chatbot with real-time web search powered by Exa"
+        title="BlueJ Tax Law Research Assistant"
+        subtitle="AI-powered tax law research with Progressive Results Availability"
         rightContent={
           <div className="flex items-center gap-2">
             {messages.length > 0 && (
@@ -298,7 +307,6 @@ function App() {
                 <RefreshCw size={14} />
               </button>
             )}
-            <SearchTypeDropdown mode={searchType} onChange={setSearchType} disabled={isLoading} />
             <Link to="/tutorial">
               <Button
                 variant="default"
@@ -335,7 +343,7 @@ function App() {
         <footer className="relative z-[1] sticky bottom-0 border-t border-[#e5e5e5] bg-white/80 backdrop-blur-sm">
           <div className="mx-auto max-w-4xl px-6 py-4">
             <ChatInputBlue
-              placeholder="Ask about anything on the web..."
+              placeholder="Ask about tax law, regulations, or rulings..."
               tags={followups.length > 0 ? followups : DEFAULT_SUGGESTIONS}
               onSubmit={handleSubmit}
               disabled={isLoading}
@@ -350,16 +358,16 @@ function App() {
 // Multi-hop search nudges for empty state
 const SEARCH_NUDGES = [
   {
-    title: "Multi-source Analysis",
-    prompt: "Compare the latest climate policies from the US, EU, and China"
+    title: "Federal Tax Law",
+    prompt: `What are the key changes in federal tax law for ${new Date().getFullYear()}?`
   },
   {
-    title: "Emerging Trends",
-    prompt: `What are the most promising AI safety breakthroughs from ${new Date().getFullYear()}?`
+    title: "State Tax Research",
+    prompt: "Compare sales tax rates across California, New York, and Texas"
   },
   {
-    title: "Market Intelligence",
-    prompt: "Which YC-backed startups in autonomous vehicles raised funding this month?"
+    title: "International Tax",
+    prompt: "What are the current US-Canada tax treaty withholding rates?"
   }
 ];
 
@@ -389,7 +397,7 @@ function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
           )}
 
           <ChatInputBlue
-            placeholder="Ask about anything on the web..."
+            placeholder="Ask about tax law, regulations, or rulings..."
             tags={suggestions}
             onSubmit={onSubmit}
             disabled={disabled}
@@ -543,55 +551,64 @@ function LoadingRings({ searching = false, queries = [] }) {
   );
 }
 
-// Search Query Row component - shows Exa queries with expandable sources
-function SearchQueryRow({ query, category, sources = [] }) {
+// Expandable source bar with label, count, and dropdown
+function SourceBar({ label, sources = [], color = "blue", emptyText }) {
   const [expanded, setExpanded] = useState(false);
+  const colorClasses = {
+    blue: { border: "border-blue-200", bg: "bg-blue-50", text: "text-blue-700", badge: "bg-blue-100 text-blue-600" },
+    purple: { border: "border-purple-200", bg: "bg-purple-50", text: "text-purple-700", badge: "bg-purple-100 text-purple-600" },
+    amber: { border: "border-amber-200", bg: "bg-amber-50", text: "text-amber-700", badge: "bg-amber-100 text-amber-600" },
+  };
+  const c = colorClasses[color] || colorClasses.blue;
+
+  if (sources.length === 0 && emptyText) {
+    return (
+      <div className={`mb-3 flex items-center gap-2 rounded-lg border ${c.border} ${c.bg} px-3 py-2.5`}>
+        <img src={exaLogomarkBlue} alt="Exa" className="h-4 w-4 shrink-0" />
+        <span className={`text-[13px] font-medium ${c.text} flex-1`}>{label}</span>
+        <span className="text-[12px] text-[#60646c] italic">{emptyText}</span>
+      </div>
+    );
+  }
+
+  if (sources.length === 0) return null;
 
   return (
     <div className="mb-3">
       <button
         onClick={() => setExpanded(!expanded)}
-        className="flex items-center gap-2 rounded-lg border border-[#e5e5e5] bg-[#fafafa] px-3 py-2 text-left transition-all hover:border-[#0040f0] hover:bg-white w-full"
+        className={`flex items-center gap-2 rounded-lg border ${c.border} ${c.bg} px-3 py-2 text-left transition-all hover:bg-white w-full`}
       >
         <img src={exaLogomarkBlue} alt="Exa" className="h-4 w-4 shrink-0" />
-        <span className="text-[13px] text-[#000911] flex-1">{query}</span>
-        {category && (
-          <span className="rounded bg-[#f0f0f0] px-2 py-0.5 text-[11px] text-[#60646c]">
-            {category}
-          </span>
-        )}
-        {sources.length > 0 && (
-          <div className="flex items-center gap-1.5">
-            <div className="flex items-center -space-x-1">
-              {sources.slice(0, 5).map((src, i) => {
-                let domain;
-                try { domain = new URL(src.url).hostname; } catch { return null; }
-                return (
-                  <img
-                    key={i}
-                    src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
-                    alt=""
-                    className="h-3.5 w-3.5 rounded-full border border-white"
-                    onError={(e) => { e.target.style.display = 'none'; }}
-                  />
-                );
-              })}
-            </div>
-            <span className="text-[11px] text-[#60646c]">
-              {sources.length} {sources.length === 1 ? 'source' : 'sources'}
-            </span>
+        <span className={`text-[13px] font-medium ${c.text} flex-1`}>{label}</span>
+        <div className="flex items-center gap-1.5">
+          <div className="flex items-center -space-x-1">
+            {sources.slice(0, 5).map((src, i) => {
+              let domain;
+              try { domain = new URL(src.url).hostname; } catch { return null; }
+              return (
+                <img
+                  key={i}
+                  src={`https://www.google.com/s2/favicons?domain=${domain}&sz=64`}
+                  alt=""
+                  className="h-3.5 w-3.5 rounded-full border border-white"
+                  onError={(e) => { e.target.style.display = 'none'; }}
+                />
+              );
+            })}
           </div>
-        )}
-        {sources.length > 0 && (
-          expanded ? (
-            <ChevronDown size={16} className="text-[#60646c]" />
-          ) : (
-            <ChevronRight size={16} className="text-[#60646c]" />
-          )
+          <span className={`rounded px-1.5 py-0.5 text-[11px] font-medium ${c.badge}`}>
+            {sources.length}
+          </span>
+        </div>
+        {expanded ? (
+          <ChevronDown size={16} className="text-[#60646c]" />
+        ) : (
+          <ChevronRight size={16} className="text-[#60646c]" />
         )}
       </button>
 
-      {expanded && sources.length > 0 && (
+      {expanded && (
         <div className="mt-2 space-y-2 animate-sources-expand">
           {sources.map((source, j) => (
             <a
@@ -615,6 +632,7 @@ function SearchQueryRow({ query, category, sources = [] }) {
                   <span className="font-medium text-[#0040f0]">{getDomain(source.url)}</span>
                   {source.date && ` · ${source.date.slice(0, 10)}`}
                   {source.author && ` · ${source.author}`}
+                  {source.crawlDate && ` · crawled ${source.crawlDate.slice(0, 10)}`}
                 </p>
               </div>
             </a>
@@ -625,7 +643,6 @@ function SearchQueryRow({ query, category, sources = [] }) {
   );
 }
 
-// Message component
 function SourcesFlashBanner({ searches, totalSources }) {
   const total = totalSources || searches.reduce((acc, s) => acc + (s.sources || []).length, 0);
 
@@ -723,17 +740,20 @@ function Message({ message }) {
           <>
             <MessageContent content={message.content} />
 
-            {/* Search queries at bottom - only show when complete */}
-            {!message.streaming && message.searches && message.searches.length > 0 && (
+            {/* PRA source bars - show 3 categories when complete */}
+            {!message.streaming && message.exaUsed && (
               <div className="mt-4 border-t border-[#e5e5e5] pt-4">
-                {message.searches.map((search, i) => (
-                  <SearchQueryRow
-                    key={i}
-                    query={search.query}
-                    category={search.category}
-                    sources={search.sources || []}
-                  />
-                ))}
+                <SourceBar
+                  label="Discovery Sources"
+                  sources={message.discoverySources || []}
+                  color="blue"
+                />
+                <SourceBar
+                  label="Livecrawled Content"
+                  sources={message.livecrawledSources || []}
+                  color="amber"
+                  emptyText="No livecrawls triggered"
+                />
               </div>
             )}
 
