@@ -288,7 +288,7 @@ function App() {
       )}
 
       <PageHeader
-        title="Tax Law Research Assistant"
+        title="BlueJ Tax Law Research Assistant"
         subtitle="AI-powered tax law research with Progressive Results Availability"
         rightContent={
           <div className="flex items-center gap-2">
