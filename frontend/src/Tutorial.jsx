@@ -286,11 +286,6 @@ export default function Tutorial() {
 
         <FlowDiagram />
 
-        <div className="grid grid-cols-3 gap-4 mb-8">
-          <MetricCard label="Livecrawls before" value="10/10" sublabel="Every result livecrawled" color="red" />
-          <MetricCard label="Livecrawls after" value="~3/10" sublabel="Only stale + relevant" color="green" />
-          <MetricCard label="Discovery latency" value="1.7-2.9s" sublabel="30 results with content" color="blue" />
-        </div>
 
         <hr className="my-8 border-[#e5e5e5]" />
 
