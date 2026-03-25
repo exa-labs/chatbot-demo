@@ -744,18 +744,12 @@ function Message({ message }) {
             {!message.streaming && message.exaUsed && (
               <div className="mt-4 border-t border-[#e5e5e5] pt-4">
                 <SourceBar
-                  label="Step 1: All Discovery Sources"
+                  label="Discovery Sources"
                   sources={message.discoverySources || []}
                   color="blue"
                 />
                 <SourceBar
-                  label="Step 2: Agent Narrowed Sources"
-                  sources={message.narrowedSources || []}
-                  color="purple"
-                  emptyText="Agent used cached content directly"
-                />
-                <SourceBar
-                  label="Step 3: Livecrawled Content"
+                  label="Livecrawled Content"
                   sources={message.livecrawledSources || []}
                   color="amber"
                   emptyText="No livecrawls triggered"
