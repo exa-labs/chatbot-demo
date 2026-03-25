@@ -5,17 +5,17 @@
   "installCommand": "npm install && cd frontend && npm install",
   "framework": null,
   "rewrites": [
-    { "source": "/bluej-demo/api/chat/stream", "destination": "/api/chat/stream" },
-    { "source": "/bluej-demo/api/chat", "destination": "/api/chat" },
-    { "source": "/bluej-demo/assets/:path*", "destination": "/assets/:path*" },
-    { "source": "/bluej-demo/fonts/:path*", "destination": "/fonts/:path*" },
-    { "source": "/bluej-demo/scenic/:path*", "destination": "/scenic/:path*" },
-    { "source": "/bluej-demo/exa-logomark-blue.svg", "destination": "/exa-logomark-blue.svg" },
-    { "source": "/bluej-demo/exa-logomark-white.svg", "destination": "/exa-logomark-white.svg" },
-    { "source": "/bluej-demo/exa_logo.png", "destination": "/exa_logo.png" },
-    { "source": "/bluej-demo/favicon.svg", "destination": "/favicon.svg" },
-    { "source": "/bluej-demo/favicon.png", "destination": "/favicon.png" },
-    { "source": "/bluej-demo", "destination": "/index.html" },
-    { "source": "/bluej-demo/:path*", "destination": "/index.html" }
+    { "source": "/chatbot-demo/api/chat/stream", "destination": "/api/chat/stream" },
+    { "source": "/chatbot-demo/api/chat", "destination": "/api/chat" },
+    { "source": "/chatbot-demo/assets/:path*", "destination": "/assets/:path*" },
+    { "source": "/chatbot-demo/fonts/:path*", "destination": "/fonts/:path*" },
+    { "source": "/chatbot-demo/scenic/:path*", "destination": "/scenic/:path*" },
+    { "source": "/chatbot-demo/exa-logomark-blue.svg", "destination": "/exa-logomark-blue.svg" },
+    { "source": "/chatbot-demo/exa-logomark-white.svg", "destination": "/exa-logomark-white.svg" },
+    { "source": "/chatbot-demo/exa_logo.png", "destination": "/exa_logo.png" },
+    { "source": "/chatbot-demo/favicon.svg", "destination": "/favicon.svg" },
+    { "source": "/chatbot-demo/favicon.png", "destination": "/favicon.png" },
+    { "source": "/chatbot-demo", "destination": "/index.html" },
+    { "source": "/chatbot-demo/:path*", "destination": "/index.html" }
   ]
 }
