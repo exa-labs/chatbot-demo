@@ -233,7 +233,9 @@ export default async function handler(req, res) {
     ];
 
     const tools = [getSearchTool(), getFetchTool()];
-    let allSearchSources = [];
+    let discoverySources = [];
+    let narrowedSources = [];
+    let livecrawledSources = [];
     let totalSearchTimeMs = 0;
     let round = 0;
     const MAX_ROUNDS = 3;
@@ -317,13 +319,14 @@ export default async function handler(req, res) {
             author: r.author,
             crawlDate: r.crawlDate,
           }));
-          allSearchSources.push(...sources);
+          discoverySources.push(...sources);
 
           sendEvent("search_complete", {
             searchTimeMs: timeMs,
             totalSources: results.length,
             step: "discovery",
             searches: [{ query, sources }],
+            discoverySources: [...discoverySources],
           });
 
           console.log(`[Step 1] Found ${results.length} results in ${timeMs}ms`);
@@ -350,14 +353,26 @@ export default async function handler(req, res) {
           const { results, timeMs } = await fetchFreshContents(urls);
           totalSearchTimeMs += timeMs;
 
+          const refreshedSources = results.map((r) => ({ title: r.title, url: r.url, crawlDate: r.crawlDate }));
+          livecrawledSources.push(...refreshedSources);
+
+          // The URLs the agent chose to re-fetch are the "narrowed" sources
+          const narrowedFromRefresh = urls.map((u) => {
+            const discovered = discoverySources.find((d) => d.url === u);
+            return discovered || { url: u, title: u };
+          });
+          narrowedSources.push(...narrowedFromRefresh);
+
           sendEvent("search_complete", {
             searchTimeMs: timeMs,
             totalSources: results.length,
             step: "refresh",
             searches: [{
               query: `Fresh content (${results.length} URLs)`,
-              sources: results.map((r) => ({ title: r.title, url: r.url, crawlDate: r.crawlDate })),
+              sources: refreshedSources,
             }],
+            livecrawledSources: [...livecrawledSources],
+            narrowedSources: [...narrowedSources],
           });
 
           console.log(`[Step 3] Fetched ${results.length} fresh results in ${timeMs}ms`);
@@ -377,9 +392,12 @@ export default async function handler(req, res) {
     }
 
     sendEvent("done", {
-      exaUsed: allSearchSources.length > 0,
+      exaUsed: discoverySources.length > 0,
       searchTimeMs: totalSearchTimeMs,
-      totalSources: allSearchSources.length,
+      totalSources: discoverySources.length,
+      discoverySources,
+      narrowedSources,
+      livecrawledSources,
     });
     res.end();
   } catch (err) {
