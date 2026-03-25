@@ -11,23 +11,23 @@ A strategy for reducing livecrawl latency from ~15s to <3s by decoupling search 
 
 ## The Problem
 
-When using livecrawl: "always" on /search, every query is bounded by the slowest crawl across all results. With 2,000+ domains and 10 results, this means ~15 second latency.
+When using livecrawl: "always" on /search, every query is bounded by the slowest crawl across all results. With 3,000+ domains and 10 results, this means ~15 second latency.
 
 ## The Solution: 3-Step PRA Flow
 
-### Step 1: Discovery (3x parallel /search calls)
+### Step 1: Discovery (3x parallel /search calls across 3,000+ domains)
 - Split domains across 3 batches (up to 1,200 per call via includeDomains)
 - Use maxAgeHours: 336 (2 weeks) + livecrawlTimeout: 1500ms
-- Returns ~30 results with cached content in 1.7-2.9s
+- Returns ~30 results with cached content + highlights in 1.7-2.9s
 
 ### Step 2: Agent Filtering (no API call)
 - LLM filters results using cached content
+- For stale results, reviews highlights for efficient relevance evaluation
 - Checks crawlDate on each result to identify stale content
-- Picks ~10 most relevant results
 
 ### Step 3: Targeted Re-fetch (parallel /contents calls)
-- Only for URLs that are both relevant AND stale
-- Uses livecrawl: "always" + livecrawlTimeout: 10000ms
+- Only for URLs that are both HIGHLY RELEVANT and stale
+- Uses livecrawl: "always" + livecrawlTimeout: 8-10s
 - Most cached results are fresh enough — only ~3/10 need re-fetching
 
 ## Key Insight
@@ -146,9 +146,9 @@ function FlowDiagram() {
         <div className="flex items-start gap-4 mb-6">
           <div className="flex-shrink-0 flex h-10 w-10 items-center justify-center rounded-full bg-[#0040f0] text-white font-bold">1</div>
           <div className="flex-1">
-            <div className="font-semibold text-[#000911] mb-2">Discovery: 3x parallel /search calls</div>
+            <div className="font-semibold text-[#000911] mb-2">Discovery: 3x parallel /search calls across 3,000+ domains</div>
             <div className="grid grid-cols-3 gap-2">
-              {["Batch A: gov domains", "Batch B: state + legal", "Batch C: firms + orgs"].map((label, i) => (
+              {["Batch 1", "Batch 2", "Batch 3"].map((label, i) => (
                 <div key={i} className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-center">
                   <div className="text-[11px] font-medium text-blue-600 mb-1">/search + contents</div>
                   <div className="text-[12px] text-blue-800">{label}</div>
@@ -178,6 +178,7 @@ function FlowDiagram() {
               <div className="text-[13px] text-purple-800 space-y-1">
                 <div>LLM evaluates 30 results using cached content</div>
                 <div className="font-medium">Checks each result's <code className="bg-purple-100 px-1 rounded">crawlDate</code> metadata</div>
+                <div>For stale results, reviews <strong>highlights</strong> for efficient relevance evaluation</div>
                 <div>Decides: <em>"Is this relevant AND stale enough to re-fetch?"</em></div>
               </div>
             </div>
@@ -208,7 +209,7 @@ function FlowDiagram() {
                 <div>
                   <div className="text-[11px] font-medium text-amber-600 mb-1">Stale results (re-fetch)</div>
                   <div className="text-[12px] text-amber-800">~3/10 results need fresh content</div>
-                  <div className="text-[10px] text-amber-600">livecrawl: "always", timeout: 10000ms</div>
+                  <div className="text-[10px] text-amber-600">livecrawl: "always", timeout: 8-10s</div>
                 </div>
               </div>
             </div>
@@ -267,7 +268,7 @@ export default function Tutorial() {
         {/* The Problem */}
         <h2 className="text-2xl font-bold text-[#000911] mb-4">The Problem</h2>
         <p className="text-[16px] text-[#000911] mb-4">
-          When an agent uses <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">livecrawl: "always"</code> on Exa's <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">/search</code> endpoint, every query waits for the slowest livecrawl across all results. With 2,000+ target domains and 10 results per call, this creates <strong>~15 second latency</strong> — unacceptable for a real-time chatbot.
+          When an agent uses <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">livecrawl: "always"</code> on Exa's <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">/search</code> endpoint, every query waits for the slowest livecrawl across all results. With 3,000+ target domains and 10 results per call, this creates <strong>~15 second latency</strong> — unacceptable for a real-time chatbot.
         </p>
 
         <div className="grid grid-cols-2 gap-4 mb-8">
@@ -297,21 +298,21 @@ export default function Tutorial() {
         <h2 className="text-2xl font-bold text-[#000911] mb-6">How Each Step Works</h2>
 
         <div className="space-y-0">
-          <Step number={1} title="Discovery: 3x Parallel /search Calls">
+          <Step number={1} title="Discovery: 3x Parallel /search Calls across 3,000+ Domains">
             <p className="mb-4">
               Split your target domains across 3 batches (Exa supports up to 1,200 domains per <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">includeDomains</code> call) and fire them in parallel:
             </p>
 
             <CodeBlock language="javascript" code={`const DOMAIN_BATCHES = [
-  // Batch A: Federal government sources
+  // Batch 1: ~1,000 domains
   ["irs.gov", "treasury.gov", "congress.gov", "supremecourt.gov",
    "uscourts.gov", "govinfo.gov", "federalregister.gov", ...],
 
-  // Batch B: State agencies + legal databases
+  // Batch 2: ~1,000 domains
   ["ftb.ca.gov", "tax.ny.gov", "revenue.pa.gov",
    "law.cornell.edu", "justia.com", "findlaw.com", ...],
 
-  // Batch C: Professional firms + organizations
+  // Batch 3: ~1,000 domains
   ["taxfoundation.org", "americanbar.org", "pwc.com",
    "deloitte.com", "ey.com", "bloomberglaw.com", ...],
 ];
@@ -333,7 +334,7 @@ const results = (await Promise.all(batchPromises)).flat();`} />
             <Note>
               <strong>includeDomains</strong> supports up to 1,200 domains per call.
               With 3 parallel calls, you can cover 3,600 domains — more than enough for most enterprise use cases.
-              For a customer with ~2,000 domains, split them across the 3 batches.
+              For a customer with ~3,000 domains, split them across the 3 batches.
             </Note>
 
             <Accordion title="Why maxAgeHours: 336 + livecrawlTimeout: 1500?">
@@ -352,7 +353,7 @@ const results = (await Promise.all(batchPromises)).flat();`} />
 
           <Step number={2} title="Agent Filtering with crawlDate">
             <p className="mb-4">
-              Each result from Step 1 includes a <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">crawlDate</code> field — the timestamp of when Exa last crawled that page. The agent uses this metadata to make the key decision: <em>"Should I fetch fresh content for this URL?"</em>
+              Each result from Step 1 includes a <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">crawlDate</code> field — the timestamp of when Exa last crawled that page. For stale results, the agent uses the <strong>highlights</strong> (not full text) to evaluate relevance efficiently — this saves cost and processing time. The agent then decides: <em>"Should I fetch fresh content for this URL?"</em>
             </p>
 
             <CodeBlock language="javascript" code={`// Each result includes crawlDate metadata
@@ -373,7 +374,7 @@ const results = (await Promise.all(batchPromises)).flat();`} />
 
             <div className="my-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
               <p className="text-[14px] text-amber-800">
-                <strong>The key insight:</strong> The agent doesn't blindly re-fetch every stale result. It uses the cached content to evaluate relevance <em>first</em>, then only re-fetches URLs where freshness actually matters. A stale PDF of a 2020 tax ruling doesn't need re-fetching — the content hasn't changed.
+                <strong>The key insight:</strong> The agent doesn't blindly re-fetch every stale result. For stale content, it reviews the <strong>highlights</strong> to evaluate relevance efficiently, then only re-fetches URLs where freshness actually matters. A stale PDF of a 2020 tax ruling doesn't need re-fetching — the content hasn't changed.
               </p>
             </div>
           </Step>
@@ -386,7 +387,7 @@ const results = (await Promise.all(batchPromises)).flat();`} />
             <CodeBlock language="javascript" code={`// Only called for URLs the agent identified as stale + relevant
 const freshContent = await exa.getContents(staleUrls, {
   livecrawl: "always",          // Force a fresh crawl
-  livecrawlTimeout: 10000,      // 10s — we're willing to wait for these
+  livecrawlTimeout: 8000,       // 8-10s — we're willing to wait for these
   text: true,
 });`} />
 
@@ -428,9 +429,9 @@ const freshContent = await exa.getContents(staleUrls, {
             <CodeBlock language="javascript" code={`{
   name: "tax_law_search",
   description: "Search tax law sources via Exa.
-    Runs 3 parallel searches across ~2000
-    domains with cached content. Results
-    include crawlDate metadata.",
+    Runs 3 parallel searches across ~3000
+    domains with cached content + highlights.
+    Results include crawlDate metadata.",
   parameters: {
     query: { type: "string" }
   }
@@ -441,8 +442,9 @@ const freshContent = await exa.getContents(staleUrls, {
             <CodeBlock language="javascript" code={`{
   name: "fetch_fresh_content",
   description: "Fetch fresh content for specific
-    stale URLs. Only use for URLs with old
-    crawlDates and time-sensitive content.",
+    stale URLs. Only use for URLs that are
+    HIGHLY RELEVANT and have old crawlDates.
+    Uses livecrawl with 8-10s timeout.",
   parameters: {
     urls: {
       type: "array",
@@ -455,42 +457,32 @@ const freshContent = await exa.getContents(staleUrls, {
         </div>
 
         <p className="text-[16px] text-[#000911] mb-4">
-          This is a <strong>multi-round tool calling</strong> pattern. The model calls <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">tax_law_search</code> first, receives results with crawlDate metadata, then decides whether to call <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">fetch_fresh_content</code> in a subsequent round.
+          The agent calls <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">tax_law_search</code> first to discover results with cached content and crawlDate metadata. Then, for any results that are both highly relevant and stale, it calls <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">fetch_fresh_content</code> to get a fresh version — with up to 8-10 seconds for the livecrawl.
         </p>
 
-        <CodeBlock language="javascript" code={`// Multi-round tool calling flow
-const tools = [searchTool, contentsTool];
-const MAX_ROUNDS = 3;
+        <h3 className="text-lg font-semibold text-[#000911] mb-3">System Prompt for the Agent</h3>
+        <p className="text-[14px] text-[#60646c] mb-3">
+          The system prompt teaches the agent the PRA decision logic — when to use each tool and how to evaluate staleness using highlights:
+        </p>
+        <CodeBlock language="text" code={`You have two tools: tax_law_search and fetch_fresh_content.
 
-for (let round = 0; round < MAX_ROUNDS; round++) {
-  const response = await llm.chat({ messages, tools });
+1. ALWAYS start by calling tax_law_search with the user's query.
+   This returns ~30 results with cached content, highlights, and crawlDate metadata.
 
-  // If model returns text (no tool call), we're done
-  if (!response.tool_calls) break;
+2. Review the results. For each result, check:
+   - Is it HIGHLY RELEVANT to the user's question?
+   - Is the crawlDate older than 2 weeks?
+   - Is this content likely to have changed (e.g., rate tables, current guidance)?
+   
+   For stale results, use the HIGHLIGHTS to evaluate relevance efficiently
+   rather than reading full text — this saves cost and processing time.
 
-  // Execute each tool call
-  for (const call of response.tool_calls) {
-    if (call.name === "tax_law_search") {
-      // Step 1: Discovery search — returns results with crawlDate
-      const results = await discoverySearch(call.args.query);
-      messages.push({ role: "tool", content: formatResults(results) });
-    }
-    if (call.name === "fetch_fresh_content") {
-      // Step 3: Targeted re-fetch — only for stale + relevant URLs
-      const fresh = await exa.getContents(call.args.urls, {
-        livecrawl: "always",
-        livecrawlTimeout: 10000,
-      });
-      messages.push({ role: "tool", content: formatResults(fresh) });
-    }
-  }
-  // Loop back — model sees tool results and decides next action
-}`} />
-
-        <Note>
-          The model can call both tools in the same round, or spread them across rounds.
-          The key is that <code className="bg-blue-100 px-1 rounded">fetch_fresh_content</code> is available but the model only uses it when crawlDate signals staleness on a relevant result.
-        </Note>
+3. Only call fetch_fresh_content for URLs that are BOTH:
+   - Highly relevant to answering the question
+   - Stale (crawlDate > 2 weeks) AND likely to have changed
+   
+   Do NOT re-fetch static documents (PDFs, archived rulings, historical content).
+   The fetch tool uses livecrawl with an 8-10 second timeout per URL.`} />
 
         <hr className="my-8 border-[#e5e5e5]" />
 
@@ -510,10 +502,9 @@ for (let round = 0; round < MAX_ROUNDS; round++) {
           {[
             ["Cache < 2 weeks", "Cached content instantly", "Recent", "Use as-is"],
             ["Cache > 2 weeks, livecrawl succeeds in 1.5s", "Fresh content", "Just now", "Use as-is"],
-            ["Cache > 2 weeks, livecrawl times out", "Stale cached content", "Old", "Evaluate, maybe re-fetch"],
-            ["No cache, livecrawl times out", "Dropped from results", "N/A", "Invisible to agent"],
+            ["Cache > 2 weeks, livecrawl times out", "Stale cached content + highlights", "Old", "Agent reviews highlights, maybe re-fetches"],
           ].map(([scenario, returned, crawlDate, action], i) => (
-            <div key={i} className={`grid grid-cols-4 px-4 py-3 text-[13px] ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafafa]'} ${i === 3 ? 'text-[#9ca3af]' : 'text-[#000911]'}`}>
+            <div key={i} className={`grid grid-cols-4 px-4 py-3 text-[13px] ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafafa]'} text-[#000911]`}>
               <div className="font-medium">{scenario}</div>
               <div>{returned}</div>
               <div>{crawlDate}</div>
@@ -522,9 +513,6 @@ for (let round = 0; round < MAX_ROUNDS; round++) {
           ))}
         </div>
 
-        <p className="text-[14px] text-[#60646c] mb-4">
-          Row 4 (no cache + timeout) is a rare edge case for well-indexed domain lists. For enterprise customers with established domains (government sites, law firms, major publishers), nearly all URLs are already in Exa's index.
-        </p>
 
         <hr className="my-8 border-[#e5e5e5]" />
 
@@ -532,15 +520,15 @@ for (let round = 0; round < MAX_ROUNDS; round++) {
         <h2 className="text-2xl font-bold text-[#000911] mb-4">Scaling with includeDomains</h2>
         <p className="text-[16px] text-[#000911] mb-4">
           Exa's <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">includeDomains</code> parameter accepts up to <strong>1,200 domains per call</strong>.
-          With 3 parallel calls, this covers <strong>3,600 domains</strong> — well beyond most enterprise needs.
+          With 3 parallel calls, this covers <strong>3,600 domains</strong> — enough for even large enterprise domain lists.
         </p>
 
-        <CodeBlock language="javascript" code={`// For a customer with 2,000+ target domains:
-// Split into 3 batches of ~667 domains each
+        <CodeBlock language="javascript" code={`// For a customer with 3,000+ target domains:
+// Split into 3 batches of ~1,000 domains each
 
-const batch1 = domains.slice(0, 667);    // Federal + major sources
-const batch2 = domains.slice(667, 1334); // State agencies
-const batch3 = domains.slice(1334);       // Firms + orgs
+const batch1 = domains.slice(0, 1000);    // Batch 1
+const batch2 = domains.slice(1000, 2000); // Batch 2
+const batch3 = domains.slice(2000);        // Batch 3
 
 // All 3 run in parallel — total latency = max(batch1, batch2, batch3)
 const results = await Promise.all([
