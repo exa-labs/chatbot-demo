@@ -2,8 +2,8 @@ import "dotenv/config";
 import express from "express";
 import cors from "cors";
 import OpenAI from "openai";
-import { discoverySearch, fetchFreshContents } from "./exa.js";
-import { getSystemPrompt, getSearchTool, getFetchTool } from "./prompt.js";
+import { searchMultiple } from "./exa.js";
+import { getSystemPrompt } from "./prompt.js";
 
 const app = express();
 app.use(cors());
@@ -14,8 +14,58 @@ const client = new OpenAI({
   apiKey: process.env.OPEN_ROUTER_KEY,
 });
 
+// Default model
 const DEFAULT_MODEL = "google/gemini-2.5-flash";
 
+const getSearchTool = () => {
+  const today = new Date().toLocaleDateString('en-US', {
+    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+  });
+  return {
+    type: "function",
+    function: {
+      name: "web_search",
+      description: `Search the web via Exa. Today is ${today}. Write queries as natural language (not keywords).
+
+RESULT COUNT:
+- Default: numResults = 5 (use this for most queries)
+- Complex queries needing depth: use multiple focused searches with numResults = 5 each
+
+CATEGORIES - Use sparingly:
+- company: ONLY for "what does X company do" or company research
+- people: RARELY use this. Only for finding biographical info on non-public figures (e.g. someone's LinkedIn). NEVER for public figures, quotes, interviews, or news. When you DO use people category, you MUST also include a second search with the same query but WITHOUT the people category, so you get both profile and general web results.
+- research_paper: ONLY for academic papers or arxiv
+
+For news, sports, general facts, current events, quotes, interviews, podcasts - DO NOT use a category.`,
+      parameters: {
+        type: "object",
+        properties: {
+          searches: {
+            type: "array",
+            items: {
+              type: "object",
+              properties: {
+                query: { type: "string", description: "Natural language query." },
+                numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
+                category: {
+                  type: "string",
+                  enum: ["company", "people", "research_paper"],
+                  description: "ONLY use for company info, person bios, or academic papers. Omit for everything else."
+                }
+              },
+              required: ["query"]
+            },
+            description: "1-3 searches to run in parallel. Use multiple searches with 5 results each for complex queries needing comprehensive coverage.",
+            maxItems: 3,
+          },
+        },
+        required: ["searches"],
+      },
+    },
+  };
+};
+
+/** Map raw SDK/provider errors to user-friendly messages. */
 function friendlyError(msg) {
   if (/JSON error injected into SSE stream/i.test(msg)) {
     return "The AI model returned an invalid response. Please try again.";
@@ -32,6 +82,10 @@ function friendlyError(msg) {
   return msg;
 }
 
+/**
+ * Iterate an OpenAI streaming response, invoking `onChunk` for each chunk.
+ * On transient SSE errors, retries once by calling `createStream` again.
+ */
 async function consumeStreamWithRetry(createStream, onChunk, { maxRetries = 1, onRetry } = {}) {
   let attempts = 0;
   while (true) {
@@ -54,24 +108,9 @@ async function consumeStreamWithRetry(createStream, onChunk, { maxRetries = 1, o
   }
 }
 
-function formatDiscoveryResults(results) {
-  if (results.length === 0) return "No results found.";
-  return results.map((r) => {
-    const date = r.publishedDate ? ` | Published: ${r.publishedDate.slice(0, 10)}` : "";
-    const crawl = r.crawlDate ? ` | crawlDate: ${r.crawlDate.slice(0, 10)}` : " | crawlDate: unknown";
-    return `- ${r.title}${date}${crawl}\n  ${r.url}\n  ${r.text?.slice(0, 600) || ""}`;
-  }).join("\n");
-}
-
-function formatFreshResults(results) {
-  if (results.length === 0) return "Failed to fetch fresh content.";
-  return results.map((r) => {
-    const crawl = r.crawlDate ? ` | crawlDate: ${r.crawlDate.slice(0, 10)}` : "";
-    return `- ${r.title}${crawl}\n  ${r.url}\n  ${r.text?.slice(0, 600) || ""}`;
-  }).join("\n");
-}
-
+// Streaming endpoint
 app.post("/api/chat/stream", async (req, res) => {
+  // Set up SSE
   res.setHeader("Content-Type", "text/event-stream");
   res.setHeader("Cache-Control", "no-cache");
   res.setHeader("Connection", "keep-alive");
@@ -81,8 +120,8 @@ app.post("/api/chat/stream", async (req, res) => {
   };
 
   try {
-    const { message, history = [], model = DEFAULT_MODEL } = req.body;
-    console.log(`[Stream] Request: "${message.slice(0, 80)}..." model: ${model}`);
+    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL, searchType = "auto" } = req.body;
+    console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}, searchType: ${searchType}`);
 
     const recentHistory = history.slice(-20).map(msg => ({
       role: msg.role,
@@ -90,142 +129,157 @@ app.post("/api/chat/stream", async (req, res) => {
     }));
 
     const messages = [
-      { role: "system", content: getSystemPrompt() },
+      { role: "system", content: getSystemPrompt(exaEnabled) },
       ...recentHistory,
       { role: "user", content: message },
     ];
 
-    const tools = [getSearchTool(), getFetchTool()];
-    let allSearchSources = [];
-    let totalSearchTimeMs = 0;
-    let round = 0;
-    const MAX_ROUNDS = 3;
+    let toolCalls = [];
+    let contentBuffer = "";
+    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
 
-    while (round < MAX_ROUNDS) {
-      round++;
-      let toolCalls = [];
-      let contentBuffer = "";
+    await consumeStreamWithRetry(
+      () => client.chat.completions.create({
+        model,
+        messages,
+        tools: exaEnabled ? [getSearchTool()] : undefined,
+        stream: true,
+      }),
+      (chunk) => {
+        const delta = chunk.choices[0]?.delta;
 
-      await consumeStreamWithRetry(
-        () => client.chat.completions.create({
-          model,
-          messages,
-          tools,
-          stream: true,
-        }),
-        (chunk) => {
-          const delta = chunk.choices[0]?.delta;
-          if (delta?.content) {
-            contentBuffer += delta.content;
-            sendEvent("content", { content: delta.content });
-          }
-          if (delta?.tool_calls) {
-            for (const tc of delta.tool_calls) {
-              const idx = tc.index;
-              if (!toolCalls[idx]) {
-                toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
-              }
-              if (tc.id) toolCalls[idx].id = tc.id;
-              if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
-              if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+        if (delta?.content) {
+          contentBuffer += delta.content;
+          sendEvent("content", { content: delta.content });
+        }
+
+        if (delta?.tool_calls) {
+          for (const tc of delta.tool_calls) {
+            const idx = tc.index;
+            if (!toolCalls[idx]) {
+              toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
             }
+            if (tc.id) toolCalls[idx].id = tc.id;
+            if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
+            if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
           }
-        },
-        { onRetry: () => { toolCalls = []; contentBuffer = ""; } }
-      );
+        }
+      },
+      { onRetry: () => { toolCalls = []; contentBuffer = ""; } }
+    );
 
-      if (toolCalls.length === 0) break;
+    if (toolCalls.length === 0) {
+      sendEvent("done", { exaUsed: false });
+      return res.end();
+    }
 
-      const assistantMessage = {
-        role: "assistant",
-        content: contentBuffer || null,
-        tool_calls: toolCalls,
-      };
-      messages.push(assistantMessage);
+    // Build assistant message for tool call flow
+    assistantMessage.content = contentBuffer || null;
+    assistantMessage.tool_calls = toolCalls;
 
-      for (const toolCall of toolCalls) {
-        let args;
-        try {
-          args = JSON.parse(toolCall.function.arguments);
-        } catch (e) {
-          console.error("Failed to parse tool args:", e.message);
-          messages.push({ role: "tool", tool_call_id: toolCall.id, content: "Error: invalid arguments" });
-          continue;
+    // Collect searches with defensive parsing for different model formats
+    const allSearches = [];
+    const toolCallIds = [];
+    for (const toolCall of toolCalls) {
+      try {
+        const args = JSON.parse(toolCall.function.arguments);
+        let searches = args.searches;
+
+        // Handle case where model returns a single search object instead of array
+        if (searches && !Array.isArray(searches)) {
+          searches = [searches];
         }
 
-        if (toolCall.function.name === "tax_law_search") {
-          const query = args.query;
-          if (!query) {
-            messages.push({ role: "tool", tool_call_id: toolCall.id, content: "Error: missing query" });
-            continue;
-          }
-
-          sendEvent("search_start", { queries: [query], step: "discovery" });
-          console.log(`[Step 1] Discovery search: "${query}"`);
-
-          const { results, timeMs } = await discoverySearch(query);
-          totalSearchTimeMs += timeMs;
-
-          const sources = results.map(r => ({
-            title: r.title,
-            url: r.url,
-            date: r.publishedDate,
-            author: r.author,
-            crawlDate: r.crawlDate,
-          }));
-          allSearchSources.push(...sources);
-
-          sendEvent("search_complete", {
-            searchTimeMs: timeMs,
-            totalSources: results.length,
-            step: "discovery",
-            searches: [{ query, sources }],
-          });
-
-          console.log(`[Step 1] Found ${results.length} results in ${timeMs}ms`);
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: `Discovery search results (${results.length} results, ${timeMs}ms):\n${formatDiscoveryResults(results)}`,
-          });
-
-        } else if (toolCall.function.name === "fetch_fresh_content") {
-          const urls = args.urls;
-          if (!urls || !Array.isArray(urls) || urls.length === 0) {
-            messages.push({ role: "tool", tool_call_id: toolCall.id, content: "Error: missing urls" });
-            continue;
-          }
-
-          sendEvent("search_start", { queries: urls.map(u => { try { return `Refreshing: ${new URL(u).hostname}`; } catch { return u; } }), step: "refresh" });
-          console.log(`[Step 3] Fetching fresh content for ${urls.length} URLs`);
-
-          const { results, timeMs } = await fetchFreshContents(urls);
-          totalSearchTimeMs += timeMs;
-
-          sendEvent("search_complete", {
-            searchTimeMs: timeMs,
-            totalSources: results.length,
-            step: "refresh",
-            searches: [{ query: `Fresh content (${results.length} URLs)`, sources: results.map(r => ({ title: r.title, url: r.url, crawlDate: r.crawlDate })) }],
-          });
-
-          console.log(`[Step 3] Fetched ${results.length} fresh results in ${timeMs}ms`);
-          messages.push({
-            role: "tool",
-            tool_call_id: toolCall.id,
-            content: `Fresh content results (${results.length} URLs, ${timeMs}ms):\n${formatFreshResults(results)}`,
-          });
-        } else {
-          messages.push({ role: "tool", tool_call_id: toolCall.id, content: `Unknown tool: ${toolCall.function.name}` });
+        // Handle case where model returns query directly in args
+        if (!searches && args.query) {
+          searches = [{ query: args.query, numResults: args.numResults }];
         }
+
+        if (Array.isArray(searches)) {
+          // Filter out invalid searches (missing query)
+          const validSearches = searches.filter(s => s && typeof s.query === 'string' && s.query.trim());
+          allSearches.push(...validSearches);
+        }
+        toolCallIds.push(toolCall.id);
+      } catch (e) {
+        console.error("Failed to parse tool call arguments:", e.message);
+        toolCallIds.push(toolCall.id);
       }
     }
 
-    sendEvent("done", {
-      exaUsed: allSearchSources.length > 0,
-      searchTimeMs: totalSearchTimeMs,
-      totalSources: allSearchSources.length,
+    // If no valid searches, return without searching
+    if (allSearches.length === 0) {
+      console.log("No valid searches extracted from tool calls");
+      sendEvent("done", { exaUsed: false });
+      return res.end();
+    }
+
+    // Send search start event
+    sendEvent("search_start", { queries: allSearches.map(s => s.query) });
+
+    console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 10} results)`).join(", ")}`);
+    const searchStart = Date.now();
+    const searchResults = await searchMultiple(allSearches, searchType);
+    const searchTimeMs = Date.now() - searchStart;
+    const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
+    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms (type: ${searchType})`);
+
+    // Send search complete event
+    sendEvent("search_complete", {
+      searchTimeMs,
+      totalSources,
+      searches: searchResults.map(({ query, category, results, timeMs }) => ({
+        query,
+        category,
+        timeMs,
+        sources: results.map(r => ({
+          title: r.title,
+          url: r.url,
+          date: r.publishedDate,
+          author: r.author,
+        })),
+      })),
     });
+
+    // Format results for the model
+    const resultsText = searchResults
+      .map(({ query, category, results }) => {
+        if (results.length === 0) {
+          return `[${query}${category ? ` (${category})` : ""}]\nNo results found.`;
+        }
+        const items = results.map((r) => {
+          const date = r.publishedDate ? ` | ${r.publishedDate.slice(0, 10)}` : "";
+          return `- ${r.title}${date}\n  ${r.url}\n  ${r.text?.slice(0, 600) || ""}`;
+        }).join("\n");
+        return `[${query}${category ? ` (${category})` : ""}]\n${items}`;
+      })
+      .join("\n\n");
+
+    const toolMessages = toolCallIds.map(id => ({
+      role: "tool",
+      tool_call_id: id,
+      content: resultsText,
+    }));
+
+    await consumeStreamWithRetry(
+      () => client.chat.completions.create({
+        model,
+        messages: [
+          ...messages,
+          assistantMessage,
+          ...toolMessages,
+        ],
+        stream: true,
+      }),
+      (chunk) => {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) {
+          sendEvent("content", { content });
+        }
+      }
+    );
+
+    sendEvent("done", { exaUsed: true, searchTimeMs, totalSources });
     res.end();
 
   } catch (err) {
@@ -235,9 +289,10 @@ app.post("/api/chat/stream", async (req, res) => {
   }
 });
 
+// Non-streaming endpoint (kept for compatibility)
 app.post("/api/chat", async (req, res) => {
   try {
-    const { message, history = [], model = DEFAULT_MODEL } = req.body;
+    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL, searchType = "auto" } = req.body;
 
     const recentHistory = history.slice(-20).map(msg => ({
       role: msg.role,
@@ -245,60 +300,105 @@ app.post("/api/chat", async (req, res) => {
     }));
 
     const messages = [
-      { role: "system", content: getSystemPrompt() },
+      { role: "system", content: getSystemPrompt(exaEnabled) },
       ...recentHistory,
       { role: "user", content: message },
     ];
 
-    const tools = [getSearchTool(), getFetchTool()];
-    let allSearchSources = [];
-    let totalSearchTimeMs = 0;
-    let round = 0;
-    const MAX_ROUNDS = 3;
+    const response = await client.chat.completions.create({
+      model,
+      messages,
+      tools: exaEnabled ? [getSearchTool()] : undefined,
+    });
 
-    while (round < MAX_ROUNDS) {
-      round++;
+    const choice = response.choices[0];
 
-      const response = await client.chat.completions.create({ model, messages, tools });
-      const choice = response.choices[0];
+    if (!choice.message.tool_calls) {
+      return res.json({ content: choice.message.content, searches: null, exaUsed: false });
+    }
 
-      if (!choice.message.tool_calls) {
-        return res.json({
-          content: choice.message.content,
-          searches: allSearchSources.length > 0 ? [{ query: "Tax law search", sources: allSearchSources }] : null,
-          exaUsed: allSearchSources.length > 0,
-          searchTimeMs: totalSearchTimeMs,
-          totalSources: allSearchSources.length,
-        });
-      }
+    // Collect searches with defensive parsing
+    const allSearches = [];
+    const toolCallIds = [];
+    for (const toolCall of choice.message.tool_calls) {
+      try {
+        const args = JSON.parse(toolCall.function.arguments);
+        let searches = args.searches;
 
-      messages.push(choice.message);
-
-      for (const toolCall of choice.message.tool_calls) {
-        let args;
-        try {
-          args = JSON.parse(toolCall.function.arguments);
-        } catch (e) {
-          messages.push({ role: "tool", tool_call_id: toolCall.id, content: "Error: invalid arguments" });
-          continue;
+        if (searches && !Array.isArray(searches)) {
+          searches = [searches];
+        }
+        if (!searches && args.query) {
+          searches = [{ query: args.query, numResults: args.numResults }];
         }
 
-        if (toolCall.function.name === "tax_law_search") {
-          const { results, timeMs } = await discoverySearch(args.query || "tax law");
-          totalSearchTimeMs += timeMs;
-          allSearchSources.push(...results.map(r => ({ title: r.title, url: r.url, date: r.publishedDate, author: r.author, crawlDate: r.crawlDate })));
-          messages.push({ role: "tool", tool_call_id: toolCall.id, content: `Discovery results (${results.length}, ${timeMs}ms):\n${formatDiscoveryResults(results)}` });
-        } else if (toolCall.function.name === "fetch_fresh_content") {
-          const { results, timeMs } = await fetchFreshContents(args.urls || []);
-          totalSearchTimeMs += timeMs;
-          messages.push({ role: "tool", tool_call_id: toolCall.id, content: `Fresh content (${results.length}, ${timeMs}ms):\n${formatFreshResults(results)}` });
-        } else {
-          messages.push({ role: "tool", tool_call_id: toolCall.id, content: `Unknown tool: ${toolCall.function.name}` });
+        if (Array.isArray(searches)) {
+          const validSearches = searches.filter(s => s && typeof s.query === 'string' && s.query.trim());
+          allSearches.push(...validSearches);
         }
+        toolCallIds.push(toolCall.id);
+      } catch (e) {
+        console.error("Failed to parse tool call arguments:", e.message);
+        toolCallIds.push(toolCall.id);
       }
     }
 
-    res.json({ content: "I encountered an issue processing your request. Please try again.", searches: null, exaUsed: false });
+    if (allSearches.length === 0) {
+      return res.json({ content: "I tried to search but couldn't form a valid query. Please try rephrasing.", searches: null, exaUsed: false });
+    }
+
+    console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 10} results)`).join(", ")}`);
+    const searchStart = Date.now();
+    const searchResults = await searchMultiple(allSearches, searchType);
+    const searchTimeMs = Date.now() - searchStart;
+    const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
+    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms`);
+
+    const resultsText = searchResults
+      .map(({ query, category, results }) => {
+        if (results.length === 0) {
+          return `[${query}${category ? ` (${category})` : ""}]\nNo results found.`;
+        }
+        const items = results.map((r) => {
+          const date = r.publishedDate ? ` | ${r.publishedDate.slice(0, 10)}` : "";
+          return `- ${r.title}${date}\n  ${r.url}\n  ${r.text?.slice(0, 600) || ""}`;
+        }).join("\n");
+        return `[${query}${category ? ` (${category})` : ""}]\n${items}`;
+      })
+      .join("\n\n");
+
+    const toolMessages = toolCallIds.map(id => ({
+      role: "tool",
+      tool_call_id: id,
+      content: resultsText,
+    }));
+
+    const finalResponse = await client.chat.completions.create({
+      model,
+      messages: [
+        ...messages,
+        choice.message,
+        ...toolMessages,
+      ],
+    });
+
+    res.json({
+      content: finalResponse.choices[0].message.content,
+      searches: searchResults.map(({ query, category, results, timeMs }) => ({
+        query,
+        category,
+        timeMs,
+        sources: results.map((r) => ({
+          title: r.title,
+          url: r.url,
+          date: r.publishedDate,
+          author: r.author,
+        })),
+      })),
+      exaUsed: true,
+      searchTimeMs,
+      totalSources,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -306,4 +406,4 @@ app.post("/api/chat", async (req, res) => {
 });
 
 const PORT = 3001;
-app.listen(PORT, () => console.log(`BlueJ PRA demo server on http://localhost:${PORT}`));
+app.listen(PORT, () => console.log(`API server running on http://localhost:${PORT}`));
