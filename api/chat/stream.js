@@ -10,283 +10,178 @@ const exa = new Exa(process.env.EXA_API_KEY);
 
 const DEFAULT_MODEL = "google/gemini-2.5-flash";
 
-async function searchExa(query, category, numResults = 5, searchType = "auto") {
-  const searchParams = {
-    numResults: Math.min(50, Math.max(3, numResults)),
-    highlights: {
-      maxCharacters: 4000,
-    },
-    type: searchType,
-  };
+const DOMAIN_BATCHES = [
+  ["irs.gov", "treasury.gov", "congress.gov", "supremecourt.gov", "uscourts.gov", "govinfo.gov", "federalregister.gov", "taxnotes.com", "tax.gov", "ttb.gov"],
+  ["ftb.ca.gov", "cdtfa.ca.gov", "tax.ny.gov", "revenue.pa.gov", "tax.illinois.gov", "comptroller.texas.gov", "dor.wa.gov", "law.cornell.edu", "justia.com", "findlaw.com"],
+  ["taxfoundation.org", "aicpa-cima.com", "americanbar.org", "bdo.com", "pwc.com", "deloitte.com", "ey.com", "kpmg.com", "bloomberglaw.com", "thomsonreuters.com"],
+];
 
-  if (category) {
-    searchParams.category = category;
-  }
+const MAX_AGE_HOURS = 336;
+const DISCOVERY_LIVECRAWL_TIMEOUT = 1500;
+const REFRESH_LIVECRAWL_TIMEOUT = 10000;
 
-  const response = await exa.searchAndContents(query, searchParams);
-
-  if (!response.results || response.results.length === 0) {
-    return [];
-  }
-
-  return response.results.map((r) => ({
-    title: r.title,
-    url: r.url,
-    text: (r.highlights || []).join("\n").slice(0, 4000),
-    publishedDate: r.publishedDate,
-    author: r.author,
-  }));
-}
-
-async function searchMultiple(searches, searchType = "auto") {
-  const searchPromises = searches.map(async ({ query, category, numResults = 5 }) => {
-    const startTime = Date.now();
+async function discoverySearch(query, numResults = 10) {
+  const startTime = Date.now();
+  const batchPromises = DOMAIN_BATCHES.map(async (domains) => {
     try {
-      const results = await searchExa(query, category, numResults, searchType);
-      const timeMs = Date.now() - startTime;
-      return { query, category, results, timeMs };
+      const response = await exa.searchAndContents(query, {
+        numResults,
+        includeDomains: domains,
+        maxAgeHours: MAX_AGE_HOURS,
+        livecrawlTimeout: DISCOVERY_LIVECRAWL_TIMEOUT,
+        text: true,
+        highlights: { maxCharacters: 4000 },
+      });
+      return response.results || [];
     } catch (err) {
-      const timeMs = Date.now() - startTime;
-      return { query, category, results: [], error: err.message, timeMs };
+      console.error(`Discovery batch failed: ${err.message}`);
+      return [];
     }
   });
-
-  return Promise.all(searchPromises);
+  const allResults = (await Promise.all(batchPromises)).flat();
+  return {
+    results: allResults.map((r) => ({
+      title: r.title,
+      url: r.url,
+      text: r.text?.slice(0, 4000) || (r.highlights || []).join("\n").slice(0, 4000),
+      publishedDate: r.publishedDate,
+      author: r.author,
+      crawlDate: r.crawlDate,
+    })),
+    timeMs: Date.now() - startTime,
+  };
 }
 
-const getSystemPrompt = (exaEnabled = true) => {
-  const currentDate = new Date().toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-  });
+async function fetchFreshContents(urls) {
+  const startTime = Date.now();
+  try {
+    const response = await exa.getContents(urls, {
+      livecrawl: "always",
+      livecrawlTimeout: REFRESH_LIVECRAWL_TIMEOUT,
+      text: true,
+    });
+    return {
+      results: (response.results || []).map((r) => ({
+        title: r.title,
+        url: r.url,
+        text: r.text?.slice(0, 4000),
+        crawlDate: r.crawlDate,
+      })),
+      timeMs: Date.now() - startTime,
+    };
+  } catch (err) {
+    console.error(`Fresh contents fetch failed: ${err.message}`);
+    return { results: [], timeMs: Date.now() - startTime };
+  }
+}
 
-  if (!exaEnabled) {
-    return `You are a helpful assistant. Web search is currently DISABLED.
+const getSystemPrompt = () => {
+  const currentDate = new Date().toLocaleDateString("en-US", {
+    weekday: "long",
+    year: "numeric",
+    month: "long",
+    day: "numeric",
+  });
+  return `You are a tax law research assistant powered by Exa search.
 
 TODAY'S DATE: ${currentDate}
 
-IMPORTANT: You do NOT have access to web search right now. If the user asks about:
-- Current events, recent news, live data
-- Stock prices, sports scores, weather
-- Anything requiring real-time information
+ALWAYS SEARCH: For any tax law question, always use tax_law_search.
 
-You MUST say something like: "I don't have access to web search right now, so I can't look up current information about [topic]. Based on my training data, I can tell you that... [provide what you know, with the caveat it may be outdated]."
+HOW YOUR SEARCH WORKS (Progressive Results Availability):
+When you call tax_law_search, the system runs 3 parallel Exa /search calls across domain batches.
+Each returns up to 10 results with cached content (maxAgeHours: 336 = 2 weeks).
+Each result includes a crawlDate.
 
-For questions you CAN answer from your training (general knowledge, coding, explanations, historical facts, etc.), answer normally and helpfully.
+THE CONTENTS DECISION:
+Call fetch_fresh_content ONLY when ALL true:
+1. The result is RELEVANT to the user's question
+2. The crawlDate is stale (>2 weeks old)
+3. The content is likely to have CHANGED (rate tables, pending legislation)
 
-FOLLOW-UP SUGGESTIONS - Always include at the very end of your response:
+Do NOT re-fetch static documents, results you won't use, or fresh results.
+
+RESPONSE STYLE:
+- Start directly with the answer
+- Cite specific sources with dates
+
+FOLLOW-UP SUGGESTIONS:
 \`\`\`followups
-["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?"]
+["Question 1?", "Question 2?", "Question 3?"]
 \`\`\``;
-  }
-
-  return `You are a helpful assistant with access to web search via Exa.
-
-TODAY'S DATE: ${currentDate}
-
-CRITICAL - TRAINING DATA IS STALE:
-Your training data has a knowledge cutoff. You do NOT know what happened after that cutoff.
-If the user asks about ANY event, result, outcome, or fact that could have occurred between your training cutoff and today (${currentDate}), you MUST search. Do NOT answer from training data alone.
-Examples of things you MUST search for:
-- Sports results (Super Bowl, World Series, championships, games)
-- Election results, political developments
-- Deaths, births, major announcements
-- Award winners (Oscars, Grammys, Nobel prizes)
-- Product launches, company news
-- Any event the user references with a year close to today's date
-If you think an event "hasn't happened yet" based on your training, CHECK TODAY'S DATE \u2014 it may have already occurred. ALWAYS search instead of assuming.
-
-WHEN TO SEARCH:
-- ANYTHING where your answer might be outdated or wrong due to your training cutoff
-- Current events, recent news, specific facts/stats
-- "latest/newest/current" anything
-- Company/product info, prices, people's current roles
-- Anything that changes over time
-- Product features, API endpoints, service capabilities, documentation
-- Specific tools, platforms, or services (their features evolve)
-- Pricing, plans, or offerings from any company/service
-- Quotes from specific people (search to find their actual words)
-- Comparisons between AI models, tech products, or services (capabilities evolve rapidly)
-- Sports outcomes, scores, winners, standings, draft results
-- Election or vote results
-- Award ceremonies and winners
-
-WHEN NOT TO SEARCH:
-- General knowledge, coding help, creative writing
-- Opinions, hypotheticals
-- Historical facts that are WELL before your training cutoff (e.g., "who won WWII" or "who was the first US president")
-- Static lists (all US presidents, all countries)
-- Definitions of general concepts (NOT product-specific features)
-- Generic comparisons of abstract concepts (but DO search for specific product/model comparisons)
-
-PARTIAL SEARCH - CRITICAL:
-When a query mixes static knowledge with time-sensitive information, ONLY search for the time-sensitive parts:
-- "List all US presidents and their current rankings" -> Answer the president list from knowledge, ONLY search for "${new Date().getFullYear()} US president rankings"
-- "What are React hooks and what's new in ${new Date().getFullYear()}?" -> Explain hooks from knowledge, ONLY search for "${new Date().getFullYear()} React updates"
-- "Name every NBA team and their current standings" -> List teams from knowledge, ONLY search for "NBA standings ${currentDate}"
-Your training data contains knowledge of history, science, geography, etc. Use it. Only search when you genuinely need current/recent information.
-
-WRITING QUERIES (today is ${currentDate}):
-Exa is semantic/neural, not keyword-based. Write natural language queries.
-Always use the correct year based on today's date (${currentDate}):
-- "2024 NFL draft picks" (wrong year \u2014 check today's date!) - WRONG
-- "${new Date().getFullYear()} NFL draft projections and mock drafts" - CORRECT
-- "TSLA stock price" (keyword style) - WRONG
-- "Tesla current stock price ${new Date().getFullYear()}" - CORRECT
-For time-sensitive queries, include the year or month when it helps — but don't force the full date into every query.
-
-FOLLOW-UP QUERIES - USE CONVERSATION CONTEXT:
-Before writing any search query, scan the recent conversation for the specific topic.
-
-When the user uses referential language, expand it:
-- "competitors" -> include the specific product/company being discussed
-- "how do I set it up" -> include what "it" refers to
-- "similar offerings" -> include the domain/category from context
-- "more about this" -> include the specific subject
-
-CATEGORIES - Use sparingly. Most queries should NOT use a category:
-- company: ONLY for "what does X company do" or company research
-- people: ONLY for biographical profiles of NON-PUBLIC figures (e.g., finding a specific professional's LinkedIn).
-  NEVER use "people" for public figures you already know (Elon Musk, Sam Altman, Ilya Sutskever, etc.)
-  NEVER use "people" for quotes, interviews, statements, news, or podcasts about/by someone
-- research_paper: ONLY for academic papers or arxiv
-
-For everything else (news, sports, general questions, quotes from people, what someone said), DO NOT use a category. Exa's general search works best for most queries.
-
-RESPONSE STYLE - MATCH THE USER'S REQUEST:
-- "Tell me everything about X" -> Give a COMPREHENSIVE deep-dive with all available information
-- "What is X?" -> Give a thorough explanation
-- "Quick question: X?" -> Be concise
-- "Summarize X" -> Be brief
-- Start directly with the answer, not "Great question!" or restating the question
-- Use clear formatting with bullet points or numbered lists when helpful
-
-FOLLOW USER REQUESTS EXACTLY:
-- If user asks for "everything" or comprehensive info -> provide thorough, detailed coverage
-- If user asks for quotes -> give ACTUAL quotes with attribution, never paraphrase
-- If user asks for "the top 5" -> give exactly 5 items
-- If user asks about a specific person/topic -> focus on that topic fully
-
-DO NOT:
-- Give sparse responses when the user asked for comprehensive information
-- Add unsolicited advice or caveats
-- Say "I couldn't find X" if you found related information - share what you found
-
-USING SEARCH RESULTS:
-When you receive search results, you MUST use them to answer:
-- Extract the answer from the sources provided
-- Be direct and confident - don't hedge or apologize
-- Only say "couldn't find" if you received literally 0 results
-- If sources are imperfect, give the best answer you can with what's available
-- Blend information naturally into flowing prose - avoid numbered lists unless the user specifically asks for them
-
-WHEN SOURCES DON'T MATCH THE QUERY:
-If the search results don't contain what the user asked for, be SPECIFIC about the mismatch:
-- "Rankings aren't always readily available in public articles" - WRONG
-- "I searched for presidential rankings but found Trump approval polls instead. The C-SPAN Historians Survey typically ranks presidents - let me know if you'd like me to search for that specifically." - CORRECT
-
-Never vaguely hedge. Either answer from sources OR specifically explain what the sources contained vs what was requested.
-
-"What Would've Been Wrong" - When search reveals something different from your training:
-WITHOUT SEARCH: [What you would have said]
-WITH SEARCH: [What the current data shows]
-
-Only include this callout when there's a meaningful difference.
-
-CHARTS - When data is numeric and comparative, include a chart block:
-Use charts for: stock prices, rankings, comparisons, statistics, polls, market share, trends over time.
-Do NOT use charts for: general news, explanations, single facts, non-numeric info.
-
-Format (place AFTER your prose response):
-\`\`\`chart
-{"type":"bar","title":"Chart Title","labels":["A","B","C"],"data":[10,20,30]}
-\`\`\`
-
-Types: "bar", "line", "pie", "doughnut"
-- bar/line: for comparisons, rankings, trends
-- pie/doughnut: for market share, distributions (parts of whole)
-
-CHART BEST PRACTICES:
-- Use descriptive, compelling titles (not just "Data" - say "NFL Coach of the Year Odds" or "Market Share by Company")
-- Keep labels SHORT (abbreviate if needed: "Minnesota" -> "MIN", "Microsoft" -> "MSFT")
-- Order data meaningfully: rank by value (highest to lowest) or chronologically for trends
-- For percentages, ensure they add to 100 for pie/doughnut
-- Round numbers for cleaner display (89.7% -> 90%, $1,234,567 -> $1.2M)
-- Limit to 5-8 data points max for readability - combine smaller values into "Other" if needed
-- For line charts showing trends, use consistent time intervals
-- Be thoughtful about scale - the graph needs to show change over time and thus you must pick time range and axis scaling that is appropriate for good visualization
-`;
 };
 
-const getSearchTool = () => {
-  const today = new Date().toLocaleDateString('en-US', {
-    weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
-  });
-  return {
-    type: "function",
-    function: {
-      name: "web_search",
-      description: `Search the web via Exa. Today is ${today}. Write queries as natural language (not keywords).
-
-RESULT COUNT - Choose based on query complexity:
-- Simple factual query (price, score, single fact): numResults = 5
-- Normal query (news, what someone said, general info): numResults = 5
-- Complex query needing depth (research, comparisons, comprehensive analysis): use multiple searches with numResults = 5 each
-
-CATEGORIES - Use sparingly:
-- company: ONLY for "what does X company do" or company research
-- people: ONLY for non-public figures (finding someone's LinkedIn). NEVER use for public figures, quotes, interviews, or news about someone
-- research_paper: ONLY for academic papers or arxiv
-
-For news, sports, general facts, current events, quotes, interviews, podcasts - DO NOT use a category.`,
-      parameters: {
-        type: "object",
-        properties: {
-          searches: {
-            type: "array",
-            items: {
-              type: "object",
-              properties: {
-                query: { type: "string", description: "Natural language query." },
-                numResults: { type: "number", description: "Number of results: 5 for simple, 5 for normal/complex. Default 5.", default: 5 },
-                category: {
-                  type: "string",
-                  enum: ["company", "people", "research_paper"],
-                  description: "ONLY use for company info, person bios, or academic papers. Omit for everything else."
-                }
-              },
-              required: ["query"]
-            },
-            description: "1-3 searches to run in parallel. Use multiple searches with 10 results each for complex queries needing comprehensive coverage.",
-            maxItems: 3,
-          },
+const getSearchTool = () => ({
+  type: "function",
+  function: {
+    name: "tax_law_search",
+    description: "Search tax law sources via Exa. Runs 3 parallel searches across ~2000 domains with cached content. Results include crawlDate metadata.",
+    parameters: {
+      type: "object",
+      properties: {
+        query: {
+          type: "string",
+          description: "Natural language tax law query.",
         },
-        required: ["searches"],
       },
+      required: ["query"],
     },
-  };
-};
+  },
+});
 
-/** Map raw SDK/provider errors to user-friendly messages. */
+const getFetchTool = () => ({
+  type: "function",
+  function: {
+    name: "fetch_fresh_content",
+    description: "Fetch fresh content for specific stale URLs. Only use for URLs with old crawlDates and time-sensitive content.",
+    parameters: {
+      type: "object",
+      properties: {
+        urls: {
+          type: "array",
+          items: { type: "string" },
+          description: "URLs to re-fetch with fresh content.",
+          maxItems: 5,
+        },
+      },
+      required: ["urls"],
+    },
+  },
+});
+
+function formatDiscoveryResults(results) {
+  if (results.length === 0) return "No results found.";
+  return results
+    .map((r) => {
+      const date = r.publishedDate ? ` | Published: ${r.publishedDate.slice(0, 10)}` : "";
+      const crawl = r.crawlDate ? ` | crawlDate: ${r.crawlDate.slice(0, 10)}` : " | crawlDate: unknown";
+      return `- ${r.title}${date}${crawl}\n  ${r.url}\n  ${r.text?.slice(0, 600) || ""}`;
+    })
+    .join("\n");
+}
+
+function formatFreshResults(results) {
+  if (results.length === 0) return "Failed to fetch fresh content.";
+  return results
+    .map((r) => {
+      const crawl = r.crawlDate ? ` | crawlDate: ${r.crawlDate.slice(0, 10)}` : "";
+      return `- ${r.title}${crawl}\n  ${r.url}\n  ${r.text?.slice(0, 600) || ""}`;
+    })
+    .join("\n");
+}
+
 function friendlyError(msg) {
-  if (/JSON error injected into SSE stream/i.test(msg)) {
+  if (/JSON error injected into SSE stream/i.test(msg))
     return "The AI model returned an invalid response. Please try again.";
-  }
-  if (/timeout|ETIMEDOUT|ECONNRESET/i.test(msg)) {
+  if (/timeout|ETIMEDOUT|ECONNRESET/i.test(msg))
     return "The request timed out. Please try again.";
-  }
-  if (/rate limit|429/i.test(msg)) {
-    return "Rate limited — please wait a moment and try again.";
-  }
-  if (/5\d{2}|server error|internal error/i.test(msg)) {
+  if (/rate limit|429/i.test(msg))
+    return "Rate limited \u2014 please wait a moment and try again.";
+  if (/5\d{2}|server error|internal error/i.test(msg))
     return "The AI service encountered an error. Please try again.";
-  }
   return msg;
 }
 
-/**
- * Iterate an OpenAI streaming response, invoking `onChunk` for each chunk.
- * On transient SSE errors, retries once by calling `createStream` again.
- */
 async function consumeStreamWithRetry(createStream, onChunk, { maxRetries = 1, onRetry } = {}) {
   let attempts = 0;
   while (true) {
@@ -295,7 +190,7 @@ async function consumeStreamWithRetry(createStream, onChunk, { maxRetries = 1, o
       for await (const chunk of stream) {
         onChunk(chunk);
       }
-      return; // success
+      return;
     } catch (err) {
       attempts++;
       const isRetryable = /JSON error injected into SSE stream|ECONNRESET|ETIMEDOUT|socket hang up/i.test(err.message);
@@ -310,8 +205,8 @@ async function consumeStreamWithRetry(createStream, onChunk, { maxRetries = 1, o
 }
 
 export default async function handler(req, res) {
-  if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Method not allowed' });
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
   }
 
   res.setHeader("Content-Type", "text/event-stream");
@@ -323,159 +218,170 @@ export default async function handler(req, res) {
   };
 
   try {
-    const { message, history = [], exaEnabled = true, model = DEFAULT_MODEL, searchType = "auto" } = req.body;
-    console.log(`[Stream] Request received - model: ${model}, exaEnabled: ${exaEnabled}, searchType: ${searchType}`);
+    const { message, history = [], model = DEFAULT_MODEL } = req.body;
+    console.log(`[Stream] Request: "${message.slice(0, 80)}..." model: ${model}`);
 
-    const recentHistory = history.slice(-20).map(msg => ({
+    const recentHistory = history.slice(-20).map((msg) => ({
       role: msg.role,
       content: msg.content,
     }));
 
     const messages = [
-      { role: "system", content: getSystemPrompt(exaEnabled) },
+      { role: "system", content: getSystemPrompt() },
       ...recentHistory,
       { role: "user", content: message },
     ];
 
-    let toolCalls = [];
-    let contentBuffer = "";
-    let assistantMessage = { role: "assistant", content: null, tool_calls: null };
+    const tools = [getSearchTool(), getFetchTool()];
+    let allSearchSources = [];
+    let totalSearchTimeMs = 0;
+    let round = 0;
+    const MAX_ROUNDS = 3;
 
-    await consumeStreamWithRetry(
-      () => client.chat.completions.create({
-        model,
-        messages,
-        tools: exaEnabled ? [getSearchTool()] : undefined,
-        stream: true,
-      }),
-      (chunk) => {
-        const delta = chunk.choices[0]?.delta;
+    while (round < MAX_ROUNDS) {
+      round++;
+      let toolCalls = [];
+      let contentBuffer = "";
 
-        if (delta?.content) {
-          contentBuffer += delta.content;
-          sendEvent("content", { content: delta.content });
-        }
+      await consumeStreamWithRetry(
+        () =>
+          client.chat.completions.create({
+            model,
+            messages,
+            tools,
+            stream: true,
+          }),
+        (chunk) => {
+          const delta = chunk.choices[0]?.delta;
 
-        if (delta?.tool_calls) {
-          for (const tc of delta.tool_calls) {
-            const idx = tc.index;
-            if (!toolCalls[idx]) {
-              toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
-            }
-            if (tc.id) toolCalls[idx].id = tc.id;
-            if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
-            if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+          if (delta?.content) {
+            contentBuffer += delta.content;
+            sendEvent("content", { content: delta.content });
           }
+
+          if (delta?.tool_calls) {
+            for (const tc of delta.tool_calls) {
+              const idx = tc.index;
+              if (!toolCalls[idx]) {
+                toolCalls[idx] = { id: "", type: "function", function: { name: "", arguments: "" } };
+              }
+              if (tc.id) toolCalls[idx].id = tc.id;
+              if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
+              if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+            }
+          }
+        },
+        {
+          onRetry: () => {
+            toolCalls = [];
+            contentBuffer = "";
+          },
         }
-      },
-      { onRetry: () => { toolCalls = []; contentBuffer = ""; } }
-    );
+      );
 
-    if (toolCalls.length === 0) {
-      sendEvent("done", { exaUsed: false });
-      return res.end();
-    }
+      if (toolCalls.length === 0) break;
 
-    assistantMessage.content = contentBuffer || null;
-    assistantMessage.tool_calls = toolCalls;
+      messages.push({
+        role: "assistant",
+        content: contentBuffer || null,
+        tool_calls: toolCalls,
+      });
 
-    const allSearches = [];
-    const toolCallIds = [];
-    for (const toolCall of toolCalls) {
-      try {
-        const args = JSON.parse(toolCall.function.arguments);
-        let searches = args.searches;
-
-        if (searches && !Array.isArray(searches)) {
-          searches = [searches];
+      for (const toolCall of toolCalls) {
+        let args;
+        try {
+          args = JSON.parse(toolCall.function.arguments);
+        } catch (e) {
+          console.error("Failed to parse tool args:", e.message);
+          messages.push({ role: "tool", tool_call_id: toolCall.id, content: "Error: invalid arguments" });
+          continue;
         }
 
-        if (!searches && args.query) {
-          searches = [{ query: args.query, numResults: args.numResults }];
-        }
+        if (toolCall.function.name === "tax_law_search") {
+          const query = args.query;
+          if (!query) {
+            messages.push({ role: "tool", tool_call_id: toolCall.id, content: "Error: missing query" });
+            continue;
+          }
 
-        if (Array.isArray(searches)) {
-          const validSearches = searches.filter(s => s && typeof s.query === 'string' && s.query.trim());
-          allSearches.push(...validSearches);
+          sendEvent("search_start", { queries: [query], step: "discovery" });
+          console.log(`[Step 1] Discovery search: "${query}"`);
+
+          const { results, timeMs } = await discoverySearch(query);
+          totalSearchTimeMs += timeMs;
+
+          const sources = results.map((r) => ({
+            title: r.title,
+            url: r.url,
+            date: r.publishedDate,
+            author: r.author,
+            crawlDate: r.crawlDate,
+          }));
+          allSearchSources.push(...sources);
+
+          sendEvent("search_complete", {
+            searchTimeMs: timeMs,
+            totalSources: results.length,
+            step: "discovery",
+            searches: [{ query, sources }],
+          });
+
+          console.log(`[Step 1] Found ${results.length} results in ${timeMs}ms`);
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: `Discovery search results (${results.length} results, ${timeMs}ms):\n${formatDiscoveryResults(results)}`,
+          });
+        } else if (toolCall.function.name === "fetch_fresh_content") {
+          const urls = args.urls;
+          if (!urls || !Array.isArray(urls) || urls.length === 0) {
+            messages.push({ role: "tool", tool_call_id: toolCall.id, content: "Error: missing urls" });
+            continue;
+          }
+
+          sendEvent("search_start", {
+            queries: urls.map((u) => {
+              try { return `Refreshing: ${new URL(u).hostname}`; } catch { return u; }
+            }),
+            step: "refresh",
+          });
+          console.log(`[Step 3] Fetching fresh content for ${urls.length} URLs`);
+
+          const { results, timeMs } = await fetchFreshContents(urls);
+          totalSearchTimeMs += timeMs;
+
+          sendEvent("search_complete", {
+            searchTimeMs: timeMs,
+            totalSources: results.length,
+            step: "refresh",
+            searches: [{
+              query: `Fresh content (${results.length} URLs)`,
+              sources: results.map((r) => ({ title: r.title, url: r.url, crawlDate: r.crawlDate })),
+            }],
+          });
+
+          console.log(`[Step 3] Fetched ${results.length} fresh results in ${timeMs}ms`);
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: `Fresh content results (${results.length} URLs, ${timeMs}ms):\n${formatFreshResults(results)}`,
+          });
+        } else {
+          messages.push({
+            role: "tool",
+            tool_call_id: toolCall.id,
+            content: `Unknown tool: ${toolCall.function.name}`,
+          });
         }
-        toolCallIds.push(toolCall.id);
-      } catch (e) {
-        console.error("Failed to parse tool call arguments:", e.message);
-        toolCallIds.push(toolCall.id);
       }
     }
 
-    if (allSearches.length === 0) {
-      console.log("No valid searches extracted from tool calls");
-      sendEvent("done", { exaUsed: false });
-      return res.end();
-    }
-
-    sendEvent("search_start", { queries: allSearches.map(s => s.query) });
-
-    console.log(`Searching: ${allSearches.map(s => `${s.query}${s.category ? ` [${s.category}]` : ""} (${s.numResults || 5} results)`).join(", ")}`);
-    const searchStart = Date.now();
-    const searchResults = await searchMultiple(allSearches, searchType);
-    const searchTimeMs = Date.now() - searchStart;
-    const totalSources = searchResults.reduce((acc, s) => acc + s.results.length, 0);
-    console.log(`Exa found ${totalSources} sources in ${searchTimeMs}ms (type: ${searchType})`);
-
-    sendEvent("search_complete", {
-      searchTimeMs,
-      totalSources,
-      searches: searchResults.map(({ query, category, results, timeMs }) => ({
-        query,
-        category,
-        timeMs,
-        sources: results.map(r => ({
-          title: r.title,
-          url: r.url,
-          date: r.publishedDate,
-          author: r.author,
-        })),
-      })),
+    sendEvent("done", {
+      exaUsed: allSearchSources.length > 0,
+      searchTimeMs: totalSearchTimeMs,
+      totalSources: allSearchSources.length,
     });
-
-    const resultsText = searchResults
-      .map(({ query, category, results }) => {
-        if (results.length === 0) {
-          return `[${query}${category ? ` (${category})` : ""}]\nNo results found.`;
-        }
-        const items = results.map((r) => {
-          const date = r.publishedDate ? ` | ${r.publishedDate.slice(0, 10)}` : "";
-          return `- ${r.title}${date}\n  ${r.url}\n  ${r.text?.slice(0, 600) || ""}`;
-        }).join("\n");
-        return `[${query}${category ? ` (${category})` : ""}]\n${items}`;
-      })
-      .join("\n\n");
-
-    const toolMessages = toolCallIds.map(id => ({
-      role: "tool",
-      tool_call_id: id,
-      content: resultsText,
-    }));
-
-    await consumeStreamWithRetry(
-      () => client.chat.completions.create({
-        model,
-        messages: [
-          ...messages,
-          assistantMessage,
-          ...toolMessages,
-        ],
-        stream: true,
-      }),
-      (chunk) => {
-        const content = chunk.choices[0]?.delta?.content;
-        if (content) {
-          sendEvent("content", { content });
-        }
-      }
-    );
-
-    sendEvent("done", { exaUsed: true, searchTimeMs, totalSources });
     res.end();
-
   } catch (err) {
     console.error("[Stream] Error:", err.message);
     sendEvent("error", { error: friendlyError(err.message) });

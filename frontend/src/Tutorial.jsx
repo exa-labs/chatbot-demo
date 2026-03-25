@@ -1,180 +1,38 @@
 import { useState } from "react";
-import { ArrowLeft, ChevronDown, ChevronRight, Copy, Check } from "lucide-react";
+import { ArrowLeft, ChevronDown, ChevronRight, Copy, Check, Clock, Zap, Database, RefreshCw, Search, FileText, ArrowRight } from "lucide-react";
 import { Link } from "react-router-dom";
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { PageHeader } from "./components/PageHeader";
 import Button from "./components/Button";
 
-const PAGE_CONTENT_FOR_LLM = `# Chatbot with Web Search
+const PAGE_CONTENT_FOR_LLM = `# Progressive Results Availability (PRA) with Exa
 
-Build an AI chatbot that intelligently calls Exa to search the web for real-time information.
+A strategy for reducing livecrawl latency from ~15s to <3s by decoupling search ranking from content freshness using Exa's /search and /contents APIs.
 
-## Overview
+## The Problem
 
-In this tutorial, we'll build a chatbot where the model decides when to search. No complex orchestration—just a tool definition and a system prompt. The model handles all the logic.
+When using livecrawl: "always" on /search, every query is bounded by the slowest crawl across all results. With 2,000+ domains and 10 results, this means ~15 second latency.
 
-1. Define a search tool the model can call
-2. Use exa.search with text: true to get search results with page contents
-3. Let the model decide when to search vs answer from training data
+## The Solution: 3-Step PRA Flow
 
-GitHub repo: https://github.com/exa-labs/chatbot-demo
+### Step 1: Discovery (3x parallel /search calls)
+- Split domains across 3 batches (up to 1,200 per call via includeDomains)
+- Use maxAgeHours: 336 (2 weeks) + livecrawlTimeout: 1500ms
+- Returns ~30 results with cached content in 1.7-2.9s
 
-## Why Exa in a chatbot?
+### Step 2: Agent Filtering (no API call)
+- LLM filters results using cached content
+- Checks crawlDate on each result to identify stale content
+- Picks ~10 most relevant results
 
-Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal project, imbuing Exa yields massive gains:
+### Step 3: Targeted Re-fetch (parallel /contents calls)
+- Only for URLs that are both relevant AND stale
+- Uses livecrawl: "always" + livecrawlTimeout: 10000ms
+- Most cached results are fresh enough — only ~3/10 need re-fetching
 
-1. Model agnostic: Works with OpenAI, Anthropic, or any open-source model
-2. Superior search: Faster, more relevant, and more comprehensive than model search calling
-3. Always current: Real-time information instead of stale training data
-4. Configurable: Exa's model parameters can dynamically be adjusted for any use case
-
-## Get Started
-
-### Step 1: Install dependencies
-
-\`\`\`bash
-npm install exa-js openai
-\`\`\`
-
-Get your Exa API key from the Exa Dashboard (https://dashboard.exa.ai).
-
-### Step 2: Initialize clients
-
-\`\`\`javascript
-import Exa from "exa-js";
-import OpenAI from "openai";
-
-const exa = new Exa(process.env.EXA_API_KEY);
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });
-\`\`\`
-
-### Step 3: Define the search tool
-
-Give the model a tool it can call when it needs web information. The tool accepts 1-5 parallel searches:
-
-\`\`\`javascript
-const searchTool = {
-  type: "function",
-  function: {
-    name: "web_search",
-    description: "Search the web for current information using Exa.",
-    parameters: {
-      type: "object",
-      properties: {
-        searches: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              query: { type: "string", description: "Search query" },
-              numResults: { type: "number", default: 5 },
-              category: {
-                type: "string",
-                enum: ["company", "people", "research_paper"],
-              }
-            },
-            required: ["query"]
-          },
-          description: "1-5 searches to run in parallel.",
-          maxItems: 5,
-        },
-      },
-      required: ["searches"],
-    },
-  },
-};
-\`\`\`
-
-### Step 4: Create the search function
-
-When the model calls the tool, execute an Exa search:
-
-\`\`\`javascript
-async function searchExa(query, numResults = 5) {
-  const response = await exa.search(query, {
-    numResults,
-    text: true,
-    type: "auto",
-  });
-  return response.results.map(r => ({
-    title: r.title,
-    url: r.url,
-    text: r.text?.substring(0, 2000),
-  }));
-}
-\`\`\`
-
-Note: We use text: true to get page contents along with search results—no separate scraping needed.
-
-### Step 5: Write the system prompt
-
-The system prompt tells the model when to search. This is one example—adjust for your use case.
-
-### Step 6: Implement the chat flow
-
-The core pattern: call the model with the tool available, execute parallel searches if requested, then stream the final answer:
-
-\`\`\`javascript
-async function chat(userMessage) {
-  const messages = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userMessage },
-  ];
-
-  // First call: model decides if it needs to search
-  const response = await client.chat.completions.create({
-    model: "gpt-4o",
-    messages,
-    tools: [searchTool],
-    stream: true,
-  });
-
-  const assistantMsg = response.choices[0].message;
-
-  // No search needed—return direct answer
-  if (!assistantMsg.tool_calls) {
-    return assistantMsg.content;
-  }
-
-  // Execute parallel searches
-  const args = JSON.parse(assistantMsg.tool_calls[0].function.arguments);
-  const searchPromises = args.searches.map(s =>
-    searchExa(s.query, s.category, s.numResults)
-  );
-  const allResults = await Promise.all(searchPromises);
-
-  // Second call: answer with search context
-  messages.push(assistantMsg, {
-    role: "tool",
-    tool_call_id: assistantMsg.tool_calls[0].id,
-    content: JSON.stringify(allResults.flat()),
-  });
-
-  const final = await client.chat.completions.create({
-    model: "gpt-4o",
-    messages,
-    stream: true,
-  });
-
-  return final.choices[0].message.content;
-}
-\`\`\`
-
-Note: The model can request 1-5 parallel searches for complex queries. Streaming is supported for both the initial response and the final answer.
-
-## Showing Citations
-
-Exa returns source metadata alongside every search result. You can use this to show users exactly where information came from.
-
-Each result from exa.search includes title, url, publishedDate, and author. In this demo, we pass that metadata to the frontend separately from the LLM response. After the model finishes answering, we render the sources as expandable cards grouped by search query.
-
-Instead of showing all sources in a list, you could have the LLM cite inline (e.g. [1], [2]) by instructing it to reference specific URLs from the Exa results. You could also have the model report how many sources it actually used in its answer.
-
-## Conclusion
-
-That's it! The model now decides when to search, executes Exa queries for real-time information, and synthesizes answers with citations.
-
-Get started with Exa for free: https://dashboard.exa.ai/overview
+## Key Insight
+Before: 10/10 results livecrawled (bounded by slowest)
+After: ~3/10 results livecrawled (only stale + relevant ones)
 `;
 
 const codeStyle = {
@@ -198,7 +56,6 @@ const codeStyle = {
   'class-name': { color: '#0040f0' },
 };
 
-// Code block with copy button
 function CodeBlock({ code, language }) {
   const [copied, setCopied] = useState(false);
 
@@ -229,7 +86,6 @@ function CodeBlock({ code, language }) {
   );
 }
 
-// Note component
 function Note({ children }) {
   return (
     <div className="my-4 rounded-lg border border-blue-200 bg-blue-50 p-4">
@@ -238,9 +94,8 @@ function Note({ children }) {
   );
 }
 
-// Accordion component
-function Accordion({ title, children }) {
-  const [open, setOpen] = useState(false);
+function Accordion({ title, children, defaultOpen = false }) {
+  const [open, setOpen] = useState(defaultOpen);
   return (
     <div className="my-4 rounded-lg border border-[#e5e5e5]">
       <button
@@ -255,15 +110,115 @@ function Accordion({ title, children }) {
   );
 }
 
-// Step component
-function Step({ number, title, children }) {
+function Step({ number, title, icon: Icon, children }) {
   return (
     <div className="relative pl-10 pb-8 border-l-2 border-[#e5e5e5] last:border-l-0 last:pb-0">
       <div className="absolute -left-4 flex h-8 w-8 items-center justify-center rounded-full bg-[#0040f0] text-white text-sm font-medium">
-        {number}
+        {Icon ? <Icon size={16} /> : number}
       </div>
       <h3 className="text-lg font-semibold text-[#000911] mb-3">{title}</h3>
       <div className="text-[#60646c]">{children}</div>
+    </div>
+  );
+}
+
+function MetricCard({ label, value, sublabel, color = "blue" }) {
+  const colors = {
+    blue: "border-blue-200 bg-blue-50 text-blue-800",
+    green: "border-green-200 bg-green-50 text-green-800",
+    amber: "border-amber-200 bg-amber-50 text-amber-800",
+    red: "border-red-200 bg-red-50 text-red-800",
+  };
+  return (
+    <div className={`rounded-lg border p-4 ${colors[color]}`}>
+      <div className="text-[12px] font-medium uppercase tracking-wider opacity-75">{label}</div>
+      <div className="text-2xl font-bold mt-1">{value}</div>
+      {sublabel && <div className="text-[12px] mt-1 opacity-75">{sublabel}</div>}
+    </div>
+  );
+}
+
+function FlowDiagram() {
+  return (
+    <div className="my-8 rounded-xl border border-[#e5e5e5] bg-[#fafafa] p-6 overflow-x-auto">
+      <div className="min-w-[700px]">
+        {/* Step 1 */}
+        <div className="flex items-start gap-4 mb-6">
+          <div className="flex-shrink-0 flex h-10 w-10 items-center justify-center rounded-full bg-[#0040f0] text-white font-bold">1</div>
+          <div className="flex-1">
+            <div className="font-semibold text-[#000911] mb-2">Discovery: 3x parallel /search calls</div>
+            <div className="grid grid-cols-3 gap-2">
+              {["Batch A: gov domains", "Batch B: state + legal", "Batch C: firms + orgs"].map((label, i) => (
+                <div key={i} className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-center">
+                  <div className="text-[11px] font-medium text-blue-600 mb-1">/search + contents</div>
+                  <div className="text-[12px] text-blue-800">{label}</div>
+                  <div className="text-[10px] text-blue-600 mt-1">maxAgeHours: 336</div>
+                  <div className="text-[10px] text-blue-600">livecrawlTimeout: 1500ms</div>
+                </div>
+              ))}
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <Clock size={14} className="text-green-600" />
+              <span className="text-[13px] text-green-700 font-medium">~1.7-2.9s for 30 results with content</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Arrow */}
+        <div className="flex items-center pl-5 mb-6">
+          <div className="w-0.5 h-8 bg-[#e5e5e5] ml-4" />
+        </div>
+
+        {/* Step 2 */}
+        <div className="flex items-start gap-4 mb-6">
+          <div className="flex-shrink-0 flex h-10 w-10 items-center justify-center rounded-full bg-[#7c3aed] text-white font-bold">2</div>
+          <div className="flex-1">
+            <div className="font-semibold text-[#000911] mb-2">Agent Filtering (no API call)</div>
+            <div className="rounded-lg border border-purple-200 bg-purple-50 p-4">
+              <div className="text-[13px] text-purple-800 space-y-1">
+                <div>LLM evaluates 30 results using cached content</div>
+                <div className="font-medium">Checks each result's <code className="bg-purple-100 px-1 rounded">crawlDate</code> metadata</div>
+                <div>Decides: <em>"Is this relevant AND stale enough to re-fetch?"</em></div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <Zap size={14} className="text-purple-600" />
+              <span className="text-[13px] text-purple-700 font-medium">No API call needed — uses cached content for decisions</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Arrow */}
+        <div className="flex items-center pl-5 mb-6">
+          <div className="w-0.5 h-8 bg-[#e5e5e5] ml-4" />
+        </div>
+
+        {/* Step 3 */}
+        <div className="flex items-start gap-4">
+          <div className="flex-shrink-0 flex h-10 w-10 items-center justify-center rounded-full bg-[#059669] text-white font-bold">3</div>
+          <div className="flex-1">
+            <div className="font-semibold text-[#000911] mb-2">Targeted Re-fetch: /contents for stale URLs only</div>
+            <div className="rounded-lg border border-green-200 bg-green-50 p-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-[11px] font-medium text-green-600 mb-1">Fresh results (skip)</div>
+                  <div className="text-[12px] text-green-800">~7/10 results already have fresh content</div>
+                  <div className="text-[10px] text-green-600">crawlDate within 2 weeks — use as-is</div>
+                </div>
+                <div>
+                  <div className="text-[11px] font-medium text-amber-600 mb-1">Stale results (re-fetch)</div>
+                  <div className="text-[12px] text-amber-800">~3/10 results need fresh content</div>
+                  <div className="text-[10px] text-amber-600">livecrawl: "always", timeout: 10000ms</div>
+                </div>
+              </div>
+            </div>
+            <div className="flex items-center gap-2 mt-2">
+              <RefreshCw size={14} className="text-green-600" />
+              <span className="text-[13px] text-green-700 font-medium">Only re-fetches what's relevant AND stale</span>
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -280,8 +235,8 @@ export default function Tutorial() {
   return (
     <div className="min-h-screen bg-white">
       <PageHeader
-        title="Chatbot with Web Search"
-        subtitle="Build an AI chatbot that intelligently calls Exa to search the web for real-time information"
+        title="Progressive Results Availability"
+        subtitle="Reduce livecrawl latency from ~15s to <3s with Exa's search + contents APIs"
         rightContent={
           <>
             <Button
@@ -307,332 +262,324 @@ export default function Tutorial() {
         }
       />
 
-      {/* Content */}
       <main className="mx-auto max-w-4xl px-6 py-12">
 
-        {/* Why Exa */}
-        <h2 className="text-2xl font-bold text-[#000911] mb-4">Why Exa in a chatbot?</h2>
+        {/* The Problem */}
+        <h2 className="text-2xl font-bold text-[#000911] mb-4">The Problem</h2>
         <p className="text-[16px] text-[#000911] mb-4">
-          Whether you are building an internal chatbot for your employees, a customer-facing chatbot to field questions, or as a personal project, <em>imbuing Exa yields massive gains:</em>
+          When an agent uses <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">livecrawl: "always"</code> on Exa's <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">/search</code> endpoint, every query waits for the slowest livecrawl across all results. With 2,000+ target domains and 10 results per call, this creates <strong>~15 second latency</strong> — unacceptable for a real-time chatbot.
         </p>
 
-        <ol className="list-decimal list-inside mb-8 text-[#000911] space-y-2">
-          <li><strong>Model agnostic</strong>: Works with OpenAI, Anthropic, or any open-source model</li>
-          <li><strong>Superior search</strong>: Faster, more relevant, and more comprehensive than model search calling</li>
-          <li><strong>Always current</strong>: Real-time information instead of stale training data</li>
-          <li><strong>Configurable</strong>: Exa's model parameters can dynamically be adjusted for any use case</li>
-        </ol>
+        <div className="grid grid-cols-2 gap-4 mb-8">
+          <MetricCard label="Before (livecrawl: always)" value="~15s" sublabel="Bounded by slowest crawl across 10 results" color="red" />
+          <MetricCard label="After (PRA strategy)" value="<3s" sublabel="Most results served from cache instantly" color="green" />
+        </div>
 
         <hr className="my-8 border-[#e5e5e5]" />
 
-        {/* Get Started */}
-        <h2 className="text-2xl font-bold text-[#000911] mb-6">Get Started</h2>
+        {/* The Solution */}
+        <h2 className="text-2xl font-bold text-[#000911] mb-4">The Solution: Progressive Results Availability</h2>
+        <p className="text-[16px] text-[#000911] mb-6">
+          Decouple <strong>search ranking</strong> from <strong>content freshness</strong>. Use cached content for discovery and filtering, then selectively re-fetch only the URLs that are both relevant and stale.
+        </p>
+
+        <FlowDiagram />
+
+        <div className="grid grid-cols-3 gap-4 mb-8">
+          <MetricCard label="Livecrawls before" value="10/10" sublabel="Every result livecrawled" color="red" />
+          <MetricCard label="Livecrawls after" value="~3/10" sublabel="Only stale + relevant" color="green" />
+          <MetricCard label="Discovery latency" value="1.7-2.9s" sublabel="30 results with content" color="blue" />
+        </div>
+
+        <hr className="my-8 border-[#e5e5e5]" />
+
+        {/* Step-by-step with code */}
+        <h2 className="text-2xl font-bold text-[#000911] mb-6">How Each Step Works</h2>
 
         <div className="space-y-0">
-          <Step number={1} title="Install dependencies">
-            <CodeBlock language="bash" code="npm install exa-js openai" />
-
-            <p className="my-4">
-              Get your Exa API key from the{" "}
-              <a href="https://dashboard.exa.ai" target="_blank" rel="noopener noreferrer" className="text-[#0040f0] hover:underline">
-                Exa Dashboard
-              </a>.
+          <Step number={1} title="Discovery: 3x Parallel /search Calls">
+            <p className="mb-4">
+              Split your target domains across 3 batches (Exa supports up to 1,200 domains per <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">includeDomains</code> call) and fire them in parallel:
             </p>
 
-            <Note>You'll also need an API key from your model provider (OpenAI, OpenRouter, etc.).</Note>
-          </Step>
+            <CodeBlock language="javascript" code={`const DOMAIN_BATCHES = [
+  // Batch A: Federal government sources
+  ["irs.gov", "treasury.gov", "congress.gov", "supremecourt.gov",
+   "uscourts.gov", "govinfo.gov", "federalregister.gov", ...],
 
-          <Step number={2} title="Initialize clients">
-            <CodeBlock language="javascript" code={`import Exa from "exa-js";
-import OpenAI from "openai";
+  // Batch B: State agencies + legal databases
+  ["ftb.ca.gov", "tax.ny.gov", "revenue.pa.gov",
+   "law.cornell.edu", "justia.com", "findlaw.com", ...],
 
-const exa = new Exa(process.env.EXA_API_KEY);
-const client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY });`} />
-          </Step>
+  // Batch C: Professional firms + organizations
+  ["taxfoundation.org", "americanbar.org", "pwc.com",
+   "deloitte.com", "ey.com", "bloomberglaw.com", ...],
+];
 
-          <Step number={3} title="Define the search tool">
-            <p className="mb-4">Give the model a tool it can call when it needs web information. The tool accepts 1-5 parallel searches:</p>
-            <CodeBlock language="javascript" code={`const searchTool = {
-  type: "function",
-  function: {
-    name: "web_search",
-    description: \`Search the web via Exa. Write queries as natural language.
-
-RESULT COUNT:
-- Default: numResults = 5 (use this for most queries)
-- Complex queries needing depth: use multiple focused searches with numResults = 5 each
-
-CATEGORIES - Use sparingly:
-- company: ONLY for "what does X company do" or company research
-- people: ONLY for non-public figures (finding someone's LinkedIn)
-- research_paper: ONLY for academic papers or arxiv
-
-For news, sports, general facts, quotes - DO NOT use a category.\`,
-    parameters: {
-      type: "object",
-      properties: {
-        searches: {
-          type: "array",
-          items: {
-            type: "object",
-            properties: {
-              query: { type: "string" },
-              numResults: { type: "number", default: 5 },
-              category: {
-                type: "string",
-                enum: ["company", "people", "research_paper"],
-              }
-            },
-            required: ["query"]
-          },
-          description: "1-5 searches to run in parallel.",
-          maxItems: 5,
-        },
-      },
-      required: ["searches"],
-    },
-  },
-};`} />
-          </Step>
-
-          <Step number={4} title="Create the search function">
-            <p className="mb-4">When the model calls the tool, execute an Exa search:</p>
-            <CodeBlock language="javascript" code={`async function searchExa(query, numResults = 5) {
-  const response = await exa.search(query, {
-    numResults,
+// Fire all 3 in parallel
+const batchPromises = DOMAIN_BATCHES.map(domains =>
+  exa.searchAndContents(query, {
+    numResults: 10,
+    includeDomains: domains,
+    maxAgeHours: 336,          // Accept cache up to 2 weeks old
+    livecrawlTimeout: 1500,    // 1.5s opportunistic livecrawl
     text: true,
-    type: "auto",
-  });
-  return response.results.map(r => ({
-    title: r.title,
-    url: r.url,
-    text: r.text?.substring(0, 2000),
-  }));
-}`} />
+    highlights: { maxCharacters: 4000 },
+  })
+);
 
-            <Note>We use <code className="bg-blue-100 px-1 rounded">text: true</code> to get page contents along with search results—no separate scraping needed.</Note>
-          </Step>
+const results = (await Promise.all(batchPromises)).flat();`} />
 
-          <Step number={5} title="Write the system prompt">
-            <p className="mb-4">The system prompt tells the model when to search. This is one example—adjust for your use case:</p>
+            <Note>
+              <strong>includeDomains</strong> supports up to 1,200 domains per call.
+              With 3 parallel calls, you can cover 3,600 domains — more than enough for most enterprise use cases.
+              For a customer with ~2,000 domains, split them across the 3 batches.
+            </Note>
 
-            <Accordion title="View full system prompt">
-              <CodeBlock language="text" code={`You are a helpful assistant with access to web search via Exa.
-
-TODAY'S DATE: [current date]
-Use this when writing queries about "upcoming", "recent", "current", or time-relative events.
-
-WHEN TO SEARCH:
-- Current events, recent news, specific facts/stats
-- "latest/newest/current" anything
-- Company/product info, prices, people's current roles
-- Anything that changes over time
-- Product features, API endpoints, service capabilities, documentation
-- Specific tools, platforms, or services (their features evolve)
-- Pricing, plans, or offerings from any company/service
-- Quotes from specific people (search to find their actual words)
-- Comparisons between AI models, tech products, or services (capabilities evolve rapidly)
-
-WHEN NOT TO SEARCH:
-- General knowledge, coding help, creative writing
-- Opinions, hypotheticals, well-established historical facts
-- Static lists (all US presidents, all countries, historical events)
-- Definitions of general concepts (NOT product-specific features)
-- Generic comparisons of abstract concepts (but DO search for specific product/model comparisons)
-
-PARTIAL SEARCH - CRITICAL:
-When a query mixes static knowledge with time-sensitive information, ONLY search for the time-sensitive parts:
-- "List all US presidents and their current rankings" → Answer the president list from knowledge, ONLY search for rankings
-- "What are React hooks and what's new in 2026?" → Explain hooks from knowledge, ONLY search for 2026 updates
-- "Name every NBA team and their current standings" → List teams from knowledge, ONLY search for standings
-Your training data contains comprehensive knowledge. Use it. Only search when you genuinely need current/recent information.
-
-WRITING QUERIES:
-Exa is semantic/neural, not keyword-based. Write natural language queries.
-Always use the correct year based on today's date:
-❌ "2024 NFL draft picks" (when asking about upcoming 2026 draft)
-✅ "2026 NFL draft projections and mock drafts"
-❌ "TSLA stock price" (keyword style)
-✅ "Tesla current stock performance and price"
-
-FOLLOW-UP QUERIES - USE CONVERSATION CONTEXT:
-Before writing any search query, scan the recent conversation for the specific topic.
-When the user uses referential language, expand it:
-- "competitors" → include the specific product/company being discussed
-- "how do I set it up" → include what "it" refers to
-- "similar offerings" → include the domain/category from context
-The user assumes you remember what you're talking about. Your queries should reflect that.
-
-CATEGORIES - Use sparingly. Most queries should NOT use a category:
-- company: ONLY for "what does X company do" or company research
-- people: ONLY for biographical profiles of NON-PUBLIC figures (e.g., finding a specific professional's LinkedIn). NEVER use for public figures, quotes, interviews, or news about someone
-- research_paper: ONLY for academic papers or arxiv
-For everything else (news, sports, general questions, quotes from people), DO NOT use a category.
-
-RESPONSE STYLE - MATCH THE USER'S REQUEST:
-- "Tell me everything about X" → Give a COMPREHENSIVE deep-dive with all available information
-- "What is X?" → Give a thorough explanation
-- "Quick question: X?" → Be concise
-- "Summarize X" → Be brief
-- Start directly with the answer, not "Great question!" or restating the question
-- Use clear formatting with bullet points or numbered lists when helpful
-
-FOLLOW USER REQUESTS EXACTLY:
-- If user asks for "everything" or comprehensive info → provide thorough, detailed coverage
-- If user asks for quotes → give ACTUAL quotes with attribution, never paraphrase
-- If user asks for "the top 5" → give exactly 5 items
-- If user asks about a specific person/topic → focus on that topic fully
-
-DO NOT:
-- Give sparse responses when the user asked for comprehensive information
-- Add unsolicited advice or caveats
-- Say "I couldn't find X" if you found related information - share what you found
-
-USING SEARCH RESULTS:
-When you receive search results, you MUST use them to answer:
-- Extract the answer from the sources provided
-- Be direct and confident - don't hedge or apologize
-- Only say "couldn't find" if you received literally 0 results
-- If sources are imperfect, give the best answer you can with what's available
-- Blend information naturally into flowing prose - avoid numbered lists unless the user specifically asks for them
-
-WHEN SOURCES DON'T MATCH THE QUERY:
-If the search results don't contain what the user asked for, be SPECIFIC about the mismatch:
-❌ "Rankings aren't always readily available in public articles"
-✅ "I searched for presidential rankings but found Trump approval polls instead. The C-SPAN Historians Survey typically ranks presidents - let me know if you'd like me to search for that specifically."
-Never vaguely hedge. Either answer from sources OR specifically explain what the sources contained vs what was requested.
-
-"What Would've Been Wrong" - When search reveals something different from your training:
-⚠️ WITHOUT SEARCH: [What you would have said]
-✓ WITH SEARCH: [What the current data shows]
-Only include this callout when there's a meaningful difference.
-
-CHARTS - When data is numeric and comparative, include a chart block:
-Use charts for: stock prices, rankings, comparisons, statistics, polls, market share, trends over time.
-Do NOT use charts for: general news, explanations, single facts, non-numeric info.
-
-Format (place AFTER your prose response):
-\\\`\\\`\\\`chart
-{"type":"bar","title":"Chart Title","labels":["A","B","C"],"data":[10,20,30]}
-\\\`\\\`\\\`
-
-Types: "bar", "line", "pie", "doughnut"
-- bar/line: for comparisons, rankings, trends
-- pie/doughnut: for market share, distributions (parts of whole)
-
-FOLLOW-UP SUGGESTIONS - Always include at the very end of your response:
-\\\`\\\`\\\`followups
-["Question 1?", "Question 2?", "Question 3?", "Question 4?", "Question 5?"]
-\\\`\\\`\\\``} />
+            <Accordion title="Why maxAgeHours: 336 + livecrawlTimeout: 1500?">
+              <p className="text-[14px] text-[#60646c] mb-3">
+                <strong>maxAgeHours: 336 (2 weeks)</strong> means Exa will return cached content up to 2 weeks old.
+                For most legal and government sources, content doesn't change that frequently — tax codes, court rulings,
+                and regulatory guidance are typically stable for weeks or months.
+              </p>
+              <p className="text-[14px] text-[#60646c]">
+                <strong>livecrawlTimeout: 1500ms</strong> adds an opportunistic livecrawl window. If Exa can fetch
+                a fresh version within 1.5 seconds, great — you get fresh content for free. If not, you still get
+                the cached version. This is a "best effort" freshness boost that doesn't slow down the overall query.
+              </p>
             </Accordion>
-
-            <Note>The prompt guides the model on when to search vs answer directly. Customize this based on your chatbot's purpose.</Note>
           </Step>
 
-          <Step number={6} title="Implement the chat flow">
-            <p className="mb-4">The core pattern: call the model with the tool available, execute parallel searches if requested, then stream the final answer:</p>
+          <Step number={2} title="Agent Filtering with crawlDate">
+            <p className="mb-4">
+              Each result from Step 1 includes a <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">crawlDate</code> field — the timestamp of when Exa last crawled that page. The agent uses this metadata to make the key decision: <em>"Should I fetch fresh content for this URL?"</em>
+            </p>
 
-            <CodeBlock language="javascript" code={`async function chat(userMessage) {
-  const messages = [
-    { role: "system", content: systemPrompt },
-    { role: "user", content: userMessage },
-  ];
+            <CodeBlock language="javascript" code={`// Each result includes crawlDate metadata
+{
+  title: "2025 Tax Rate Schedules",
+  url: "https://www.irs.gov/newsroom/irs-provides-tax-rate-schedules",
+  text: "For tax year 2025, the top tax rate remains 37%...",
+  crawlDate: "2025-03-20T14:30:00.000Z",  // <-- When Exa last crawled this
+  publishedDate: "2025-01-15"
+}
 
-  // First call: model decides if it needs to search
-  const response = await client.chat.completions.create({
-    model: "gpt-4o",
-    messages,
-    tools: [searchTool],
-    stream: true,
-  });
+// The agent's decision logic:
+// 1. Is this result RELEVANT to the user's question?
+// 2. Is the crawlDate stale (>2 weeks old)?
+// 3. Is the content likely to have CHANGED?
+//
+// Only if ALL THREE are true → call fetch_fresh_content`} />
 
-  const assistantMsg = response.choices[0].message;
+            <div className="my-4 rounded-lg border border-amber-200 bg-amber-50 p-4">
+              <p className="text-[14px] text-amber-800">
+                <strong>The key insight:</strong> The agent doesn't blindly re-fetch every stale result. It uses the cached content to evaluate relevance <em>first</em>, then only re-fetches URLs where freshness actually matters. A stale PDF of a 2020 tax ruling doesn't need re-fetching — the content hasn't changed.
+              </p>
+            </div>
+          </Step>
 
-  // No search needed—return direct answer
-  if (!assistantMsg.tool_calls) {
-    return assistantMsg.content;
-  }
+          <Step number={3} title="Targeted Re-fetch with /contents">
+            <p className="mb-4">
+              For the small subset of URLs that are both relevant and stale, fire targeted <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">/contents</code> calls with a longer timeout:
+            </p>
 
-  // Execute parallel searches
-  const args = JSON.parse(assistantMsg.tool_calls[0].function.arguments);
-  const searchPromises = args.searches.map(s =>
-    searchExa(s.query, s.category, s.numResults)
-  );
-  const allResults = await Promise.all(searchPromises);
+            <CodeBlock language="javascript" code={`// Only called for URLs the agent identified as stale + relevant
+const freshContent = await exa.getContents(staleUrls, {
+  livecrawl: "always",          // Force a fresh crawl
+  livecrawlTimeout: 10000,      // 10s — we're willing to wait for these
+  text: true,
+});`} />
 
-  // Second call: answer with search context
-  messages.push(assistantMsg, {
-    role: "tool",
-    tool_call_id: assistantMsg.tool_calls[0].id,
-    content: JSON.stringify(allResults.flat()),
-  });
+            <p className="mb-4">
+              Because the agent already filtered in Step 2, this typically hits only <strong>~3 out of 10</strong> URLs.
+              Each resolves independently — no "slowest result" bottleneck across the full result set.
+            </p>
 
-  const final = await client.chat.completions.create({
-    model: "gpt-4o",
-    messages,
-    stream: true,
-  });
-
-  return final.choices[0].message.content;
-}`} />
-
-            <Note>The model can request 1-5 parallel searches for complex queries. Streaming is supported for both the initial response and the final answer.</Note>
+            <Accordion title="When does the agent NOT re-fetch?">
+              <div className="space-y-3 text-[14px] text-[#60646c]">
+                <div className="flex items-start gap-2">
+                  <Check size={16} className="text-green-600 mt-0.5 shrink-0" />
+                  <span><strong>Fresh results</strong> — crawlDate is within 2 weeks. The cached content is current enough.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Check size={16} className="text-green-600 mt-0.5 shrink-0" />
+                  <span><strong>Irrelevant results</strong> — even if stale, the agent won't waste a /contents call on a result it's not going to use.</span>
+                </div>
+                <div className="flex items-start gap-2">
+                  <Check size={16} className="text-green-600 mt-0.5 shrink-0" />
+                  <span><strong>Static documents</strong> — PDFs, court rulings, archived regulations. These don't change; re-fetching returns identical content.</span>
+                </div>
+              </div>
+            </Accordion>
           </Step>
         </div>
 
         <hr className="my-8 border-[#e5e5e5]" />
 
-        {/* Showing Citations */}
-        <h2 className="text-2xl font-bold text-[#000911] mb-4">Showing Citations</h2>
+        {/* The Contents Tool Decision */}
+        <h2 className="text-2xl font-bold text-[#000911] mb-4">The Contents Tool: "Should I Re-fetch This?"</h2>
+        <p className="text-[16px] text-[#000911] mb-6">
+          The core of the PRA strategy is giving the agent a <strong>second tool</strong> — not just search, but a targeted contents fetch. The agent decides when to use it based on the crawlDate signal.
+        </p>
+
+        <div className="grid grid-cols-2 gap-6 mb-6">
+          <div>
+            <h3 className="text-lg font-semibold text-[#000911] mb-3">Tool 1: tax_law_search</h3>
+            <CodeBlock language="javascript" code={`{
+  name: "tax_law_search",
+  description: "Search tax law sources via Exa.
+    Runs 3 parallel searches across ~2000
+    domains with cached content. Results
+    include crawlDate metadata.",
+  parameters: {
+    query: { type: "string" }
+  }
+}`} />
+          </div>
+          <div>
+            <h3 className="text-lg font-semibold text-[#000911] mb-3">Tool 2: fetch_fresh_content</h3>
+            <CodeBlock language="javascript" code={`{
+  name: "fetch_fresh_content",
+  description: "Fetch fresh content for specific
+    stale URLs. Only use for URLs with old
+    crawlDates and time-sensitive content.",
+  parameters: {
+    urls: {
+      type: "array",
+      items: { type: "string" },
+      maxItems: 5
+    }
+  }
+}`} />
+          </div>
+        </div>
+
         <p className="text-[16px] text-[#000911] mb-4">
-          Exa returns source metadata alongside every search result. You can use this to show users exactly where information came from.
+          This is a <strong>multi-round tool calling</strong> pattern. The model calls <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">tax_law_search</code> first, receives results with crawlDate metadata, then decides whether to call <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">fetch_fresh_content</code> in a subsequent round.
         </p>
 
-        <h3 className="text-lg font-semibold text-[#000911] mb-3">What Exa returns</h3>
-        <p className="text-[16px] text-[#60646c] mb-4">
-          Each result from <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">exa.search</code> includes <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">title</code>, <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">url</code>, <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">publishedDate</code>, and <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">author</code>. These are your citations.
-        </p>
+        <CodeBlock language="javascript" code={`// Multi-round tool calling flow
+const tools = [searchTool, contentsTool];
+const MAX_ROUNDS = 3;
 
-        <CodeBlock language="javascript" code={`// Each Exa result includes citation metadata
-const sources = response.results.map(r => ({
-  title: r.title,         // "OpenAI announces GPT-5"
-  url: r.url,             // "https://openai.com/blog/gpt-5"
-  publishedDate: r.publishedDate, // "2026-02-15"
-  author: r.author,       // "OpenAI"
-}));`} />
+for (let round = 0; round < MAX_ROUNDS; round++) {
+  const response = await llm.chat({ messages, tools });
 
-        <h3 className="text-lg font-semibold text-[#000911] mt-6 mb-3">How we display them</h3>
-        <p className="text-[16px] text-[#60646c] mb-4">
-          In this demo, we pass the source metadata to the frontend separately from the LLM response. After the model finishes answering, we render the sources as expandable cards grouped by search query — each showing the title, domain, date, and a link to the original page.
-        </p>
+  // If model returns text (no tool call), we're done
+  if (!response.tool_calls) break;
 
-        <CodeBlock language="javascript" code={`// Send citation metadata to the frontend
-const citationData = searchResults.map(({ query, results }) => ({
-  query,
-  sources: results.map(r => ({
-    title: r.title,
-    url: r.url,
-    date: r.publishedDate,
-    author: r.author,
-  })),
-}));`} />
+  // Execute each tool call
+  for (const call of response.tool_calls) {
+    if (call.name === "tax_law_search") {
+      // Step 1: Discovery search — returns results with crawlDate
+      const results = await discoverySearch(call.args.query);
+      messages.push({ role: "tool", content: formatResults(results) });
+    }
+    if (call.name === "fetch_fresh_content") {
+      // Step 3: Targeted re-fetch — only for stale + relevant URLs
+      const fresh = await exa.getContents(call.args.urls, {
+        livecrawl: "always",
+        livecrawlTimeout: 10000,
+      });
+      messages.push({ role: "tool", content: formatResults(fresh) });
+    }
+  }
+  // Loop back — model sees tool results and decides next action
+}`} />
 
         <Note>
-          Instead of showing all sources in a list, you could have the LLM cite inline (e.g. [1], [2]) by instructing it to reference specific URLs from the Exa results. You could also have the model report how many sources it actually used in its answer, giving users a confidence signal without cluttering the UI.
+          The model can call both tools in the same round, or spread them across rounds.
+          The key is that <code className="bg-blue-100 px-1 rounded">fetch_fresh_content</code> is available but the model only uses it when crawlDate signals staleness on a relevant result.
         </Note>
 
         <hr className="my-8 border-[#e5e5e5]" />
 
-        {/* Conclusion */}
-        <p className="text-[16px] text-[#000911] mb-6">
-          That's it! The model now decides when to search, executes Exa queries for real-time information, and synthesizes answers with citations.
+        {/* The crawlDate Signal */}
+        <h2 className="text-2xl font-bold text-[#000911] mb-4">The crawlDate Signal</h2>
+        <p className="text-[16px] text-[#000911] mb-4">
+          Every Exa search result with contents includes a <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">crawlDate</code> field. This is the metadata that powers the agent's re-fetch decisions:
         </p>
+
+        <div className="my-6 rounded-xl border border-[#e5e5e5] overflow-hidden">
+          <div className="grid grid-cols-4 bg-[#f4f4f5] px-4 py-2 text-[12px] font-medium text-[#60646c] uppercase tracking-wider">
+            <div>Scenario</div>
+            <div>What's returned</div>
+            <div>crawlDate</div>
+            <div>Agent action</div>
+          </div>
+          {[
+            ["Cache < 2 weeks", "Cached content instantly", "Recent", "Use as-is"],
+            ["Cache > 2 weeks, livecrawl succeeds in 1.5s", "Fresh content", "Just now", "Use as-is"],
+            ["Cache > 2 weeks, livecrawl times out", "Stale cached content", "Old", "Evaluate, maybe re-fetch"],
+            ["No cache, livecrawl times out", "Dropped from results", "N/A", "Invisible to agent"],
+          ].map(([scenario, returned, crawlDate, action], i) => (
+            <div key={i} className={`grid grid-cols-4 px-4 py-3 text-[13px] ${i % 2 === 0 ? 'bg-white' : 'bg-[#fafafa]'} ${i === 3 ? 'text-[#9ca3af]' : 'text-[#000911]'}`}>
+              <div className="font-medium">{scenario}</div>
+              <div>{returned}</div>
+              <div>{crawlDate}</div>
+              <div className="font-medium">{action}</div>
+            </div>
+          ))}
+        </div>
+
+        <p className="text-[14px] text-[#60646c] mb-4">
+          Row 4 (no cache + timeout) is a rare edge case for well-indexed domain lists. For enterprise customers with established domains (government sites, law firms, major publishers), nearly all URLs are already in Exa's index.
+        </p>
+
+        <hr className="my-8 border-[#e5e5e5]" />
+
+        {/* includeDomains */}
+        <h2 className="text-2xl font-bold text-[#000911] mb-4">Scaling with includeDomains</h2>
+        <p className="text-[16px] text-[#000911] mb-4">
+          Exa's <code className="bg-[#f4f4f5] px-1.5 py-0.5 rounded text-[13px] text-[#0040f0]">includeDomains</code> parameter accepts up to <strong>1,200 domains per call</strong>.
+          With 3 parallel calls, this covers <strong>3,600 domains</strong> — well beyond most enterprise needs.
+        </p>
+
+        <CodeBlock language="javascript" code={`// For a customer with 2,000+ target domains:
+// Split into 3 batches of ~667 domains each
+
+const batch1 = domains.slice(0, 667);    // Federal + major sources
+const batch2 = domains.slice(667, 1334); // State agencies
+const batch3 = domains.slice(1334);       // Firms + orgs
+
+// All 3 run in parallel — total latency = max(batch1, batch2, batch3)
+const results = await Promise.all([
+  exa.searchAndContents(query, { includeDomains: batch1, ... }),
+  exa.searchAndContents(query, { includeDomains: batch2, ... }),
+  exa.searchAndContents(query, { includeDomains: batch3, ... }),
+]);`} />
+
+        <hr className="my-8 border-[#e5e5e5]" />
+
+        {/* Summary */}
+        <div className="rounded-xl border border-[#e5e5e5] bg-[#fafafa] p-6 mb-8">
+          <h2 className="text-xl font-bold text-[#000911] mb-4">Summary</h2>
+          <div className="space-y-3 text-[14px] text-[#000911]">
+            <div className="flex items-start gap-3">
+              <Search size={18} className="text-[#0040f0] mt-0.5 shrink-0" />
+              <span><strong>Step 1</strong> — 3x parallel <code className="bg-white px-1 rounded border border-[#e5e5e5]">/search</code> with <code className="bg-white px-1 rounded border border-[#e5e5e5]">maxAgeHours: 336</code> + <code className="bg-white px-1 rounded border border-[#e5e5e5]">livecrawlTimeout: 1500</code> — returns 30 results with content in &lt;3s</span>
+            </div>
+            <div className="flex items-start gap-3">
+              <Zap size={18} className="text-[#7c3aed] mt-0.5 shrink-0" />
+              <span><strong>Step 2</strong> — Agent filters using cached content + <code className="bg-white px-1 rounded border border-[#e5e5e5]">crawlDate</code> metadata — no API call needed</span>
+            </div>
+            <div className="flex items-start gap-3">
+              <FileText size={18} className="text-[#059669] mt-0.5 shrink-0" />
+              <span><strong>Step 3</strong> — Targeted <code className="bg-white px-1 rounded border border-[#e5e5e5]">/contents</code> with <code className="bg-white px-1 rounded border border-[#e5e5e5]">livecrawl: "always"</code> — only ~3/10 results need this</span>
+            </div>
+          </div>
+        </div>
 
         <p className="text-[16px] text-[#000911]">
           Get started with{" "}
           <a href="https://dashboard.exa.ai/overview" target="_blank" rel="noopener noreferrer" className="text-[#0040f0] hover:underline">
             Exa for free
-          </a>.
+          </a>
+          {" "}and check out the{" "}
+          <a href="https://docs.exa.ai" target="_blank" rel="noopener noreferrer" className="text-[#0040f0] hover:underline">
+            API documentation
+          </a>
+          {" "}for full parameter reference.
         </p>
       </main>
     </div>

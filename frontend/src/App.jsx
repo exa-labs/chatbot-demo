@@ -20,11 +20,11 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointEleme
 
 // Default suggestion tags - defined outside component to prevent recreation
 const DEFAULT_SUGGESTIONS = [
-  "What's trending in tech today?",
-  "What are the top AI startups in 2026?",
-  "What did Elon Musk say this week?",
-  "Find recent research on AGI safety",
-  "What's the current Bitcoin price?",
+  "What are the current federal income tax brackets?",
+  "Recent IRS guidance on cryptocurrency taxation",
+  "What's new in state sales tax regulations?",
+  "Latest developments in international tax treaties",
+  "Current estate tax exemption limits",
 ];
 
 function App() {
@@ -279,8 +279,8 @@ function App() {
       )}
 
       <PageHeader
-        title="Exa Chatbot Demo"
-        subtitle="AI chatbot with real-time web search powered by Exa"
+        title="Tax Law Research Assistant"
+        subtitle="AI-powered tax law research with Progressive Results Availability"
         rightContent={
           <div className="flex items-center gap-2">
             {messages.length > 0 && (
@@ -335,7 +335,7 @@ function App() {
         <footer className="relative z-[1] sticky bottom-0 border-t border-[#e5e5e5] bg-white/80 backdrop-blur-sm">
           <div className="mx-auto max-w-4xl px-6 py-4">
             <ChatInputBlue
-              placeholder="Ask about anything on the web..."
+              placeholder="Ask about tax law, regulations, or rulings..."
               tags={followups.length > 0 ? followups : DEFAULT_SUGGESTIONS}
               onSubmit={handleSubmit}
               disabled={isLoading}
@@ -350,16 +350,16 @@ function App() {
 // Multi-hop search nudges for empty state
 const SEARCH_NUDGES = [
   {
-    title: "Multi-source Analysis",
-    prompt: "Compare the latest climate policies from the US, EU, and China"
+    title: "Federal Tax Law",
+    prompt: `What are the key changes in federal tax law for ${new Date().getFullYear()}?`
   },
   {
-    title: "Emerging Trends",
-    prompt: `What are the most promising AI safety breakthroughs from ${new Date().getFullYear()}?`
+    title: "State Tax Research",
+    prompt: "Compare sales tax rates across California, New York, and Texas"
   },
   {
-    title: "Market Intelligence",
-    prompt: "Which YC-backed startups in autonomous vehicles raised funding this month?"
+    title: "International Tax",
+    prompt: "What are the current US-Canada tax treaty withholding rates?"
   }
 ];
 
@@ -389,7 +389,7 @@ function EmptyState({ onSubmit, suggestions, disabled, exaEnabled }) {
           )}
 
           <ChatInputBlue
-            placeholder="Ask about anything on the web..."
+            placeholder="Ask about tax law, regulations, or rulings..."
             tags={suggestions}
             onSubmit={onSubmit}
             disabled={disabled}
